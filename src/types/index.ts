@@ -22,10 +22,7 @@ export interface VerificationStatus {
   isVerified: boolean;
   ownerTwitter: string | null;
   verificationRequired: boolean;
-  verificationInstructions?: {
-    tweetText: string;
-    steps: string[];
-  };
+  verificationInstructions?: string;
 }
 
 export interface AgentInfo extends Agent {
@@ -166,6 +163,13 @@ export interface CalculatorResult {
 // Event Types
 // ===========================================
 
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  estimatedCost: number;
+}
+
 export type AgentEvent =
   | { type: "startup" }
   | { type: "polling"; jobCount: number }
@@ -174,7 +178,7 @@ export type AgentEvent =
   | { type: "job_skipped"; job: Job; reason: string }
   | { type: "tool_call"; tool: string; args: unknown }
   | { type: "tool_result"; tool: string; result: ToolResult }
-  | { type: "response_generated"; job: Job; preview: string }
+  | { type: "response_generated"; job: Job; preview: string; usage?: TokenUsage }
   | { type: "response_submitted"; job: Job; responseId: string }
   | { type: "error"; message: string; error?: Error }
   | { type: "shutdown" };

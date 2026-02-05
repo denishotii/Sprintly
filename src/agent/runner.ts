@@ -1,14 +1,48 @@
 import { EventEmitter } from "events";
+import Conf from "conf";
 import { SeedstrClient } from "../api/client.js";
 import { getLLMClient } from "../llm/client.js";
 import { getConfig } from "../config/index.js";
 import { logger } from "../utils/logger.js";
-import type { Job, AgentEvent } from "../types/index.js";
+import type { Job, AgentEvent, TokenUsage } from "../types/index.js";
+
+// Approximate costs per 1M tokens for common models (input/output)
+const MODEL_COSTS: Record<string, { input: number; output: number }> = {
+  "anthropic/claude-sonnet-4": { input: 3.0, output: 15.0 },
+  "anthropic/claude-opus-4": { input: 15.0, output: 75.0 },
+  "anthropic/claude-3.5-sonnet": { input: 3.0, output: 15.0 },
+  "anthropic/claude-3-opus": { input: 15.0, output: 75.0 },
+  "openai/gpt-4-turbo": { input: 10.0, output: 30.0 },
+  "openai/gpt-4o": { input: 5.0, output: 15.0 },
+  "openai/gpt-4o-mini": { input: 0.15, output: 0.6 },
+  "meta-llama/llama-3.1-405b-instruct": { input: 3.0, output: 3.0 },
+  "meta-llama/llama-3.1-70b-instruct": { input: 0.5, output: 0.5 },
+  "google/gemini-pro-1.5": { input: 2.5, output: 7.5 },
+  // Default fallback
+  default: { input: 1.0, output: 3.0 },
+};
+
+function estimateCost(model: string, promptTokens: number, completionTokens: number): number {
+  const costs = MODEL_COSTS[model] || MODEL_COSTS.default;
+  const inputCost = (promptTokens / 1_000_000) * costs.input;
+  const outputCost = (completionTokens / 1_000_000) * costs.output;
+  return inputCost + outputCost;
+}
 
 interface TypedEventEmitter {
   on(event: "event", listener: (event: AgentEvent) => void): this;
   emit(event: "event", data: AgentEvent): boolean;
 }
+
+// Persistent storage for processed jobs
+const jobStore = new Conf<{ processedJobs: string[] }>({
+  projectName: "seed-agent",
+  projectVersion: "1.0.0",
+  configName: "jobs",
+  defaults: {
+    processedJobs: [],
+  },
+});
 
 /**
  * Main agent runner that polls for jobs and processes them
@@ -18,17 +52,43 @@ export class AgentRunner extends EventEmitter implements TypedEventEmitter {
   private running = false;
   private pollTimer: NodeJS.Timeout | null = null;
   private processingJobs: Set<string> = new Set();
-  private processedJobs: Set<string> = new Set();
+  private processedJobs: Set<string>;
   private stats = {
     jobsProcessed: 0,
     jobsSkipped: 0,
     errors: 0,
     startTime: Date.now(),
+    totalPromptTokens: 0,
+    totalCompletionTokens: 0,
+    totalTokens: 0,
+    totalCost: 0,
   };
 
   constructor() {
     super();
     this.client = new SeedstrClient();
+    
+    // Load previously processed jobs from persistent storage
+    const stored = jobStore.get("processedJobs") || [];
+    this.processedJobs = new Set(stored);
+    logger.debug(`Loaded ${this.processedJobs.size} previously processed jobs`);
+  }
+
+  /**
+   * Mark a job as processed and persist to storage
+   */
+  private markJobProcessed(jobId: string): void {
+    this.processedJobs.add(jobId);
+    
+    // Keep only the last 1000 job IDs to prevent unlimited growth
+    const jobArray = Array.from(this.processedJobs);
+    if (jobArray.length > 1000) {
+      const trimmed = jobArray.slice(-1000);
+      this.processedJobs = new Set(trimmed);
+    }
+    
+    // Persist to storage
+    jobStore.set("processedJobs", Array.from(this.processedJobs));
   }
 
   /**
@@ -101,7 +161,7 @@ export class AgentRunner extends EventEmitter implements TypedEventEmitter {
             job,
             reason: `Budget $${job.budget} below minimum $${config.minBudget}`,
           });
-          this.processedJobs.add(job.id);
+          this.markJobProcessed(job.id);
           this.stats.jobsSkipped++;
           continue;
         }
@@ -163,15 +223,22 @@ export class AgentRunner extends EventEmitter implements TypedEventEmitter {
 
       this.stats.jobsProcessed++;
     } catch (error) {
-      this.emitEvent({
-        type: "error",
-        message: `Error processing job ${job.id}: ${error instanceof Error ? error.message : String(error)}`,
-        error: error instanceof Error ? error : new Error(String(error)),
-      });
-      this.stats.errors++;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // Handle "already submitted" error gracefully - not really an error
+      if (errorMessage.includes("already submitted")) {
+        logger.debug(`Already responded to job ${job.id}, skipping`);
+      } else {
+        this.emitEvent({
+          type: "error",
+          message: `Error processing job ${job.id}: ${errorMessage}`,
+          error: error instanceof Error ? error : new Error(String(error)),
+        });
+        this.stats.errors++;
+      }
     } finally {
       this.processingJobs.delete(job.id);
-      this.processedJobs.add(job.id);
+      this.markJobProcessed(job.id);
     }
   }
 

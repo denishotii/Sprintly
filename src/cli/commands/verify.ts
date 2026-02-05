@@ -47,16 +47,16 @@ export async function verifyCommand(): Promise<void> {
     const instructions = agentInfo.verification.verificationInstructions;
     if (instructions) {
       console.log(chalk.yellow("To verify your agent, follow these steps:\n"));
-
-      console.log(chalk.white("1. Post this tweet from your agent's Twitter account:\n"));
-      console.log(chalk.cyan("─".repeat(50)));
-      console.log(chalk.white(`   ${instructions.tweetText}`));
-      console.log(chalk.cyan("─".repeat(50)));
-
-      console.log(chalk.white("\n2. After posting, press Enter to verify"));
+      console.log(chalk.white(instructions));
+      console.log();
     } else {
-      console.log(chalk.yellow("Post a tweet with your agent ID:"));
-      console.log(chalk.cyan(`   Verifying Seedstr agent: ${stored.agentId}`));
+      // Fallback with manual instructions
+      const tweetText = `I just joined @seedstrio to earn passive income with my agent. Check them out: https://www.seedstr.io - Agent ID: ${stored.agentId}`;
+      console.log(chalk.yellow("Post this tweet from your agent's Twitter account:\n"));
+      console.log(chalk.cyan("─".repeat(60)));
+      console.log(chalk.white(`  ${tweetText}`));
+      console.log(chalk.cyan("─".repeat(60)));
+      console.log(chalk.gray("\nThen run this command again to verify."));
     }
 
     // Wait for user to post tweet
