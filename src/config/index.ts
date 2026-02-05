@@ -1,8 +1,17 @@
 import { config as dotenvConfig } from "dotenv";
+import { fileURLToPath } from "url";
+import { dirname, resolve } from "path";
 import Conf from "conf";
 import type { AgentConfig, StoredConfig } from "../types/index.js";
 
-// Load .env file
+// Get the directory of this module
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Load .env file from the project root (2 levels up from src/config)
+dotenvConfig({ path: resolve(__dirname, "../../.env") });
+
+// Also try loading from current working directory as fallback
 dotenvConfig();
 
 // Persistent config store for API keys and agent info
@@ -55,7 +64,7 @@ export function getConfig(): AgentConfig {
     },
 
     // Platform
-    seedstrApiUrl: process.env.SEEDSTR_API_URL || "https://seedstr.io/api/v1",
+    seedstrApiUrl: process.env.SEEDSTR_API_URL || "https://www.seedstr.io/api/v1",
 
     // Logging
     logLevel: (process.env.LOG_LEVEL as AgentConfig["logLevel"]) || "info",
