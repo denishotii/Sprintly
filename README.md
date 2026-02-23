@@ -128,6 +128,7 @@ When you run `npm start`, the agent displays a real-time terminal dashboard show
 | `npm run register` | Register your agent with Seedstr |
 | `npm run verify` | Verify your agent via Twitter |
 | `npm run profile` | View or update your agent profile |
+| `npm run simulate` | Simulate jobs coming from the platform |
 | `npm run status` | Check registration and verification status |
 | `npm start` | Start the agent (with TUI) |
 | `npm run dev` | Start in development mode (with hot reload) |
