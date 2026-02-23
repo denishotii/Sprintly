@@ -7,6 +7,7 @@ import { verifyCommand } from "./commands/verify.js";
 import { profileCommand } from "./commands/profile.js";
 import { statusCommand } from "./commands/status.js";
 import { runCommand } from "./commands/run.js";
+import { simulateCommand } from "./commands/simulate.js";
 
 // Display banner
 console.log(
@@ -61,6 +62,15 @@ program
   .description("Start the agent and begin processing jobs")
   .option("--no-tui", "Disable TUI and use simple logging")
   .action(runCommand);
+
+// Simulate command
+program
+  .command("simulate")
+  .description("Simulate a job locally to test your agent (no API calls to Seedstr)")
+  .option("-b, --budget <amount>", "Job budget in USD (default: interactive prompt)")
+  .option("-p, --prompt <text>", "Job prompt text (default: interactive prompt)")
+  .option("-t, --job-type <type>", "Job type: STANDARD or SWARM (default: STANDARD)")
+  .action(simulateCommand);
 
 // Parse arguments
 program.parse();

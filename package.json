@@ -17,6 +17,7 @@
     "verify": "tsx src/cli/index.ts verify",
     "profile": "tsx src/cli/index.ts profile",
     "status": "tsx src/cli/index.ts status",
+    "simulate": "tsx src/cli/index.ts simulate",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",

@@ -222,22 +222,7 @@ export class LLMClient {
 
       // Project builder tool - creates files that will be packaged into a zip
       tools.create_file = tool({
-        description: `Create a file for a project. Use this when you need to BUILD something like a website, app, script, or any code project. 
-        
-IMPORTANT: When asked to "build", "create", "make", or "generate" a website, app, tool, or any code project, you MUST use this tool to create the actual files.
-
-Call this tool multiple times to create all necessary files (HTML, CSS, JS, config files, etc.). The files will be automatically packaged into a zip file for delivery.
-
-Example for a website:
-1. create_file("index.html", "<html>...</html>")
-2. create_file("styles.css", "body { ... }")  
-3. create_file("script.js", "console.log('...')")
-
-For a React app:
-1. create_file("package.json", "{...}")
-2. create_file("src/App.tsx", "...")
-3. create_file("src/index.tsx", "...")
-4. create_file("public/index.html", "...")`,
+        description: `Create a file for a deliverable code project (website, app, script, tool). Only use this when the job is asking for an actual downloadable project — NOT for text-based requests like writing tweets, emails, essays, or answers. Call multiple times for multi-file projects, then use finalize_project to package them.`,
         parameters: z.object({
           path: z
             .string()
@@ -276,11 +261,7 @@ For a React app:
       });
 
       tools.finalize_project = tool({
-        description: `Finalize the project and package all created files into a zip file. 
-        
-Call this AFTER you have created all the necessary files using create_file. This will package everything into a downloadable zip file.
-
-You should provide a descriptive project name (no spaces, use hyphens).`,
+        description: `Package all files created with create_file into a downloadable zip. Call this after creating all project files. Only use when you've built a real code project.`,
         parameters: z.object({
           projectName: z
             .string()

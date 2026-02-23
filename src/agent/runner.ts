@@ -446,19 +446,12 @@ Guidelines:
 - Be professional and concise
 - If you use web search, cite your sources
 
-IMPORTANT - Building Projects:
-When asked to BUILD, CREATE, MAKE, or GENERATE a website, app, tool, script, or any code project:
-1. Use the create_file tool to create each necessary file
-2. After creating all files, use finalize_project to package them into a zip
-3. Provide a clear summary of what you built and how to use it
+Responding to jobs:
+- Most jobs are asking for TEXT responses — writing, answers, advice, ideas, analysis, tweets, emails, etc. For these, just respond directly with well-written text. Do NOT create files for text-based requests.
+- Only use create_file and finalize_project when the job is genuinely asking for a deliverable code project (a website, app, script, tool, etc.) that the requester would need to download and run/open.
+- Use your judgment to determine what the requester actually wants. "Write me a tweet" = text response. "Build me a landing page" = file project.
 
-Example build request: "Build me a landing page for my coffee shop called Bean Dreams"
-- You would create index.html, styles.css, and any other needed files
-- Then call finalize_project with a name like "bean-dreams-website"
-- Provide a summary explaining the website and how to open/deploy it
-
-Job Budget: $${effectiveBudget.toFixed(2)} USD${job.jobType === "SWARM" ? ` (your share of $${job.budget.toFixed(2)} total across ${job.maxAgents} agents)` : ""}
-This indicates how much the requester values this task. Higher budgets often mean the requester wants something built, not just described.`,
+Job Budget: $${effectiveBudget.toFixed(2)} USD${job.jobType === "SWARM" ? ` (your share of $${job.budget.toFixed(2)} total across ${job.maxAgents} agents)` : ""}`,
         tools: true,
       });
 
