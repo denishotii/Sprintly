@@ -1,11 +1,15 @@
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { generateText, tool, CoreTool } from "ai";
+import { tool, zodSchema, type Tool } from "ai";
 import { z } from "zod";
 import { getConfig } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { webSearch, type WebSearchResult } from "../tools/webSearch.js";
 import { calculator, type CalculatorResult } from "../tools/calculator.js";
-import { ProjectBuilder, type ProjectFile, type ProjectBuildResult } from "../tools/projectBuilder.js";
+import { ProjectBuilder, type ProjectBuildResult } from "../tools/projectBuilder.js";
+import {
+  createOpenAIProvider,
+  createAnthropicProvider,
+  type LLMProvider,
+} from "./providers/index.js";
 
 // Errors that are worth retrying (usually transient LLM output issues)
 const RETRYABLE_ERROR_PATTERNS = [
@@ -110,48 +114,117 @@ export interface GenerateOptions {
   tools?: boolean;
 }
 
+/** Pipeline step names; each can use its own model (see config plannerModel, builderModel, verifierModel). */
+export type PipelineStep = "planner" | "builder" | "verifier";
+
 /**
- * OpenRouter LLM Client with built-in tool support
+ * LLM Client with direct OpenAI and Anthropic API support.
+ * Supports a single primary provider for generate(), and per-step models for the pipeline via generateForStep().
  */
 export class LLMClient {
-  private openrouter: ReturnType<typeof createOpenRouter>;
-  private model: string;
-  private maxTokens: number;
-  private temperature: number;
+  private readonly primaryProvider: LLMProvider;
+  /** OpenAI provider (created when OPENAI_API_KEY is set). Used for models like gpt-*. */
+  private readonly openaiProvider: LLMProvider | null;
+  /** Anthropic provider (created when ANTHROPIC_API_KEY is set). Used for models like claude-*. */
+  private readonly anthropicProvider: LLMProvider | null;
+  private readonly maxTokens: number;
+  private readonly temperature: number;
+  private readonly config: ReturnType<typeof getConfig>;
 
   constructor() {
     const config = getConfig();
+    this.config = config;
 
-    if (!config.openrouterApiKey) {
-      throw new Error("OPENROUTER_API_KEY is required");
+    const hasOpenAI = !!config.openaiApiKey?.trim();
+    const hasAnthropic = !!config.anthropicApiKey?.trim();
+
+    if (config.primaryProvider === "openai" && !hasOpenAI) {
+      throw new Error(
+        "OPENAI_API_KEY is required when PRIMARY_PROVIDER=openai. Set OPENAI_API_KEY in your environment."
+      );
+    }
+    if (config.primaryProvider === "anthropic" && !hasAnthropic) {
+      throw new Error(
+        "ANTHROPIC_API_KEY is required when PRIMARY_PROVIDER=anthropic. Set ANTHROPIC_API_KEY in your environment."
+      );
+    }
+    if (!hasOpenAI && !hasAnthropic) {
+      throw new Error("At least one of OPENAI_API_KEY or ANTHROPIC_API_KEY is required.");
     }
 
-    this.openrouter = createOpenRouter({
-      apiKey: config.openrouterApiKey,
-    });
+    this.openaiProvider = hasOpenAI
+      ? createOpenAIProvider({ apiKey: config.openaiApiKey, model: config.openaiModel })
+      : null;
+    this.anthropicProvider = hasAnthropic
+      ? createAnthropicProvider({ apiKey: config.anthropicApiKey, model: config.anthropicModel })
+      : null;
 
-    this.model = config.model;
+    this.primaryProvider =
+      config.primaryProvider === "openai" ? this.openaiProvider! : this.anthropicProvider!;
     this.maxTokens = config.maxTokens;
     this.temperature = config.temperature;
+
+    logger.debug(
+      `LLM client: primary=${this.primaryProvider.name}, openai=${!!this.openaiProvider}, anthropic=${!!this.anthropicProvider}`
+    );
+  }
+
+  /**
+   * Resolve which provider to use for a given model ID (e.g. planner/builder/verifier models).
+   * Convention: claude-* → Anthropic, gpt-* / o1-* → OpenAI.
+   */
+  getProviderForModel(modelId: string): LLMProvider {
+    const id = modelId.toLowerCase();
+    if (id.startsWith("gpt-") || id.startsWith("o1-")) {
+      if (!this.openaiProvider) {
+        throw new Error(
+          `Model "${modelId}" requires OpenAI. Set OPENAI_API_KEY in your environment.`
+        );
+      }
+      return this.openaiProvider;
+    }
+    if (id.startsWith("claude-")) {
+      if (!this.anthropicProvider) {
+        throw new Error(
+          `Model "${modelId}" requires Anthropic. Set ANTHROPIC_API_KEY in your environment.`
+        );
+      }
+      return this.anthropicProvider;
+    }
+    throw new Error(
+      `Unknown model prefix for "${modelId}". Use gpt-* (OpenAI) or claude-* (Anthropic).`
+    );
+  }
+
+  /** Return the configured model ID for a pipeline step (planner, builder, verifier). */
+  getModelForStep(step: PipelineStep): string {
+    switch (step) {
+      case "planner":
+        return this.config.plannerModel;
+      case "builder":
+        return this.config.builderModel;
+      case "verifier":
+        return this.config.verifierModel;
+    }
   }
 
   /**
    * Get available tools based on configuration
    */
-  private getTools(): Record<string, CoreTool> {
+  private getTools(): Record<string, Tool> {
     const config = getConfig();
-    const tools: Record<string, CoreTool> = {};
+    const tools: Record<string, Tool> = {};
 
     if (config.tools.webSearchEnabled) {
       tools.web_search = tool({
         description:
           "Search the web for current information. Use this when you need up-to-date information, facts, news, prices, or data that might not be in your training data. Returns an array of search results with title, url, and snippet containing the relevant information.",
-        parameters: z.object({
+        inputSchema: zodSchema(z.object({
           query: z
             .string()
             .describe("The search query to look up on the web"),
-        }),
-        execute: async ({ query }): Promise<WebSearchResult[]> => {
+        })),
+        execute: async ({ query }: { query: string }): Promise<WebSearchResult[]> => {
           logger.tool("web_search", "start", `Query: ${query}`);
           try {
             const results = await webSearch(query);
@@ -173,14 +246,14 @@ export class LLMClient {
       tools.calculator = tool({
         description:
           "Perform mathematical calculations. Use this for any math operations, equations, or numerical computations.",
-        parameters: z.object({
+        inputSchema: zodSchema(z.object({
           expression: z
             .string()
             .describe(
               "The mathematical expression to evaluate (e.g., '2 + 2', 'sqrt(16)', 'sin(45)')"
             ),
-        }),
-        execute: async ({ expression }): Promise<CalculatorResult> => {
+        })),
+        execute: async ({ expression }: { expression: string }): Promise<CalculatorResult> => {
           logger.tool("calculator", "start", `Expression: ${expression}`);
           try {
             const result = calculator(expression);
@@ -198,7 +271,7 @@ export class LLMClient {
       tools.code_analysis = tool({
         description:
           "Analyze code snippets, explain code logic, identify bugs, or suggest improvements. This tool helps with code-related questions.",
-        parameters: z.object({
+        inputSchema: zodSchema(z.object({
           code: z.string().describe("The code snippet to analyze"),
           language: z
             .string()
@@ -207,8 +280,8 @@ export class LLMClient {
           task: z
             .enum(["explain", "debug", "improve", "review"])
             .describe("What to do with the code"),
-        }),
-        execute: async ({ code, language, task }) => {
+        })),
+        execute: async ({ code, language, task }: { code: string; language?: string; task: string }) => {
           logger.tool("code_analysis", "start", `Task: ${task}`);
           // This is a meta-tool - it returns structured data for the LLM to use
           return {
@@ -223,7 +296,7 @@ export class LLMClient {
       // Project builder tool - creates files that will be packaged into a zip
       tools.create_file = tool({
         description: `Create a file for a deliverable code project (website, app, script, tool). Only use this when the job is asking for an actual downloadable project — NOT for text-based requests like writing tweets, emails, essays, or answers. Call multiple times for multi-file projects, then use finalize_project to package them.`,
-        parameters: z.object({
+        inputSchema: zodSchema(z.object({
           path: z
             .string()
             .describe(
@@ -232,8 +305,8 @@ export class LLMClient {
           content: z
             .string()
             .describe("The complete content of the file"),
-        }),
-        execute: async ({ path, content }) => {
+        })),
+        execute: async ({ path, content }: { path: string; content: string }) => {
           logger.tool("create_file", "start", `Creating: ${path}`);
           try {
             // Initialize project builder if not exists
@@ -262,12 +335,12 @@ export class LLMClient {
 
       tools.finalize_project = tool({
         description: `Package all files created with create_file into a downloadable zip. Call this after creating all project files. Only use when you've built a real code project.`,
-        parameters: z.object({
+        inputSchema: zodSchema(z.object({
           projectName: z
             .string()
             .describe("A descriptive name for the project (e.g., 'business-website', 'react-todo-app')"),
-        }),
-        execute: async ({ projectName }) => {
+        })),
+        execute: async ({ projectName }: { projectName: string }) => {
           logger.tool("finalize_project", "start", `Finalizing: ${projectName}`);
           try {
             if (!activeProjectBuilder) {
@@ -297,7 +370,26 @@ export class LLMClient {
   }
 
   /**
-   * Generate a response using the LLM with optional tool calling
+   * Generate a response for a pipeline step using that step's configured model (PLANNER_MODEL, BUILDER_MODEL, VERIFIER_MODEL).
+   * Use this when implementing the planner → builder → verifier pipeline; the correct provider (OpenAI/Anthropic) is chosen from the model ID.
+   */
+  async generateForStep(
+    step: PipelineStep,
+    options: GenerateOptions
+  ): Promise<LLMResponse> {
+    const model = this.getModelForStep(step);
+    const provider = this.getProviderForModel(model);
+    return this.executeGenerationWithProvider(provider, model, {
+      prompt: options.prompt,
+      systemPrompt: options.systemPrompt,
+      maxTokens: options.maxTokens ?? this.maxTokens,
+      temperature: options.temperature ?? this.temperature,
+      tools: options.tools !== false ? this.getTools() : undefined,
+    });
+  }
+
+  /**
+   * Generate a response using the LLM with optional tool calling (primary provider, default model).
    */
   async generate(options: GenerateOptions): Promise<LLMResponse> {
     const {
@@ -308,7 +400,7 @@ export class LLMClient {
       tools: enableTools = true,
     } = options;
 
-    logger.debug(`Generating response with model: ${this.model}`);
+    logger.debug(`Generating response with provider: ${this.primaryProvider.name}`);
 
     // Reset project builder for each generation
     activeProjectBuilder = null;
@@ -323,13 +415,11 @@ export class LLMClient {
     // Retry loop for recoverable errors
     while (attempt <= retryConfig.maxRetries) {
       try {
-        const result = await this.executeGeneration({
-          prompt,
-          systemPrompt,
-          maxTokens,
-          temperature,
-          tools: hasTools ? tools : undefined,
-        });
+        const result = await this.executeGenerationWithProvider(
+          this.primaryProvider,
+          undefined,
+          { prompt, systemPrompt, maxTokens, temperature, tools: hasTools ? tools : undefined }
+        );
         
         return result;
       } catch (error) {
@@ -359,13 +449,17 @@ export class LLMClient {
           try {
             // Reset and try without tools
             activeProjectBuilder = null;
-            const fallbackResult = await this.executeGeneration({
-              prompt: prompt + "\n\n[Note: Please provide a text response only, as tool execution is temporarily unavailable.]",
-              systemPrompt,
-              maxTokens,
-              temperature,
-              tools: undefined,
-            });
+            const fallbackResult = await this.executeGenerationWithProvider(
+              this.primaryProvider,
+              undefined,
+              {
+                prompt: prompt + "\n\n[Note: Please provide a text response only, as tool execution is temporarily unavailable.]",
+                systemPrompt,
+                maxTokens,
+                temperature,
+                tools: undefined,
+              }
+            );
             
             logger.info("Fallback generation without tools succeeded");
             return fallbackResult;
@@ -386,137 +480,70 @@ export class LLMClient {
   }
 
   /**
-   * Execute the actual LLM generation (separated for retry logic)
+   * Execute the actual LLM generation (separated for retry logic).
+   * Can use a specific provider and model (e.g. for pipeline steps) or the primary provider with default model.
    */
-  private async executeGeneration(params: {
-    prompt: string;
-    systemPrompt?: string;
-    maxTokens: number;
-    temperature: number;
-    tools?: Record<string, CoreTool>;
-  }): Promise<LLMResponse> {
-    const { prompt, systemPrompt, maxTokens, temperature, tools } = params;
-    const hasTools = tools && Object.keys(tools).length > 0;
-
-    try {
-      const result = await generateText({
-        model: this.openrouter(this.model),
-        prompt,
-        system: systemPrompt,
-        maxTokens,
-        temperature,
-        tools: hasTools ? tools : undefined,
-        maxSteps: hasTools ? 10 : 1, // Allow up to 10 tool call steps
-        onStepFinish: (step) => {
-          // Debug logging for each step
-          logger.debug(`Step finished - finishReason: ${step.finishReason}, hasText: ${!!step.text}, toolCalls: ${step.toolCalls?.length || 0}`);
-          if (step.text) {
-            logger.debug(`Step text preview: ${step.text.substring(0, 100)}...`);
-          }
-        },
-      });
-
-      // Log completion info
-      logger.debug(`Generation complete - finishReason: ${result.finishReason}, steps: ${result.steps?.length || 0}`);
-      
-      // Extract tool calls from steps
-      const toolCalls: LLMResponse["toolCalls"] = [];
-      if (result.steps) {
-        for (const step of result.steps) {
-          const stepToolCalls = step.toolCalls as Array<{
-            toolName: string;
-            toolCallId: string;
-            args: Record<string, unknown>;
-          }> | undefined;
-          const stepToolResults = step.toolResults as Array<{
-            toolCallId: string;
-            result: unknown;
-          }> | undefined;
-          
-          if (stepToolCalls) {
-            for (const tc of stepToolCalls) {
-              const toolResult = stepToolResults?.find(
-                (tr) => tr.toolCallId === tc.toolCallId
-              )?.result;
-              
-              toolCalls.push({
-                name: tc.toolName,
-                args: tc.args,
-                result: toolResult,
-              });
-              
-              // Log tool results for debugging
-              if (toolResult) {
-                const resultStr = JSON.stringify(toolResult);
-                logger.debug(`Tool ${tc.toolName} result: ${resultStr.substring(0, 200)}...`);
-              }
-            }
-          }
-        }
-      }
-
-      // Use result.text which should contain the final response after all tool calls
-      // If the model stopped due to tool_calls without a final text, this might be empty
-      let finalText = result.text;
-      
-      // If we have no text but have tool results, the model may not have generated a final response
-      if (!finalText && toolCalls.length > 0) {
-        logger.warn("Model finished with tool calls but no final text response. Finish reason:", result.finishReason);
-        // Try to get text from the last step that has text
-        if (result.steps) {
-          for (let i = result.steps.length - 1; i >= 0; i--) {
-            if (result.steps[i].text) {
-              finalText = result.steps[i].text;
-              break;
-            }
-          }
-        }
-      }
-
-      // Check if a project was built during this generation
-      let projectBuild: ProjectBuildResult | undefined;
-      
-      // Look for finalize_project tool call results
-      const finalizeCall = toolCalls.find((tc) => tc.name === "finalize_project");
-      if (finalizeCall && finalizeCall.result) {
-        const finalizeResult = finalizeCall.result as {
-          success: boolean;
-          projectName: string;
-          zipPath: string;
-          files: string[];
-          totalSize: number;
-          error?: string;
-        };
-        
-        // Get reference to active project builder (may have been set during tool execution)
-        const builder = getActiveBuilder();
-        if (finalizeResult.success && builder) {
-          projectBuild = {
-            success: true,
-            projectDir: builder.getProjectDir(),
-            zipPath: finalizeResult.zipPath,
-            files: finalizeResult.files,
-            totalSize: finalizeResult.totalSize,
-          };
-        }
-      }
-
-      return {
-        text: finalText,
-        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        usage: result.usage
-          ? {
-              promptTokens: result.usage.promptTokens,
-              completionTokens: result.usage.completionTokens,
-              totalTokens: result.usage.totalTokens,
-            }
-          : undefined,
-        projectBuild,
-      };
-    } catch (error) {
-      logger.error("LLM generation failed:", error);
-      throw error;
+  private async executeGenerationWithProvider(
+    provider: LLMProvider,
+    modelOverride: string | undefined,
+    params: {
+      prompt: string;
+      systemPrompt?: string;
+      maxTokens: number;
+      temperature: number;
+      tools?: Record<string, Tool>;
     }
+  ): Promise<LLMResponse> {
+    const { prompt, systemPrompt, maxTokens, temperature, tools } = params;
+
+    const result = await provider.generate({
+      prompt,
+      systemPrompt,
+      maxTokens,
+      temperature,
+      tools,
+      model: modelOverride,
+    });
+
+    const toolCalls = result.toolCalls;
+
+    for (const tc of toolCalls ?? []) {
+      if (tc.result) {
+        const resultStr = JSON.stringify(tc.result);
+        logger.debug(`Tool ${tc.name} result: ${resultStr.substring(0, 200)}...`);
+      }
+    }
+
+    // Derive projectBuild from finalize_project tool result (same as before)
+    let projectBuild: ProjectBuildResult | undefined;
+    const finalizeCall = (toolCalls ?? []).find((tc) => tc.name === "finalize_project");
+    if (finalizeCall?.result) {
+      const finalizeResult = finalizeCall.result as {
+        success: boolean;
+        projectName: string;
+        zipPath: string;
+        files: string[];
+        totalSize: number;
+        error?: string;
+      };
+      const builder = getActiveBuilder();
+      if (finalizeResult.success && builder) {
+        projectBuild = {
+          success: true,
+          projectDir: builder.getProjectDir(),
+          zipPath: finalizeResult.zipPath,
+          files: finalizeResult.files,
+          totalSize: finalizeResult.totalSize,
+        };
+      }
+    }
+
+    return {
+      text: result.text,
+      toolCalls: (toolCalls?.length ?? 0) > 0 ? toolCalls : undefined,
+      usage: result.usage,
+      projectBuild,
+    };
   }
   
   /**

@@ -39,8 +39,9 @@ export async function simulateCommand(options: SimulateOptions): Promise<void> {
 
   const config = getConfig();
 
-  if (!config.openrouterApiKey) {
-    console.log(chalk.red("✗ OPENROUTER_API_KEY is required in your .env file"));
+  const hasLLMKey = !!(config.openaiApiKey?.trim() || config.anthropicApiKey?.trim());
+  if (!hasLLMKey) {
+    console.log(chalk.red("✗ At least one of OPENAI_API_KEY or ANTHROPIC_API_KEY is required in your .env file"));
     process.exit(1);
   }
 
