@@ -4,7 +4,11 @@ import { getConfig } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { webSearch, type WebSearchResult } from "../tools/webSearch.js";
 import { calculator, type CalculatorResult } from "../tools/calculator.js";
-import { ProjectBuilder, type ProjectBuildResult } from "../tools/projectBuilder.js";
+import {
+  ProjectBuilder,
+  type ProjectBuildResult,
+  type ProjectFile,
+} from "../tools/projectBuilder.js";
 import {
   createOpenAIProvider,
   createAnthropicProvider,
@@ -293,9 +297,44 @@ export class LLMClient {
         },
       });
 
-      // Project builder tool - creates files that will be packaged into a zip
+      // Batch project creation — preferred for pipeline builder step (one call, all files)
+      tools.create_project = tool({
+        description: `Create a complete project in one call: pass projectName and an array of { path, content } for every file. Use this when building a full web project (e.g. from a plan). All files are written and zipped in one step. Include index.html, styles/main.css, scripts/app.js, README.md as needed. Do NOT use for text-only requests.`,
+        inputSchema: zodSchema(z.object({
+          projectName: z.string().describe("Short slug for the project (e.g. 'landing-page', 'todo-app')"),
+          files: z.array(z.object({
+            path: z.string().describe("Relative path, e.g. 'index.html', 'styles/main.css'"),
+            content: z.string().describe("Full file content"),
+          })).describe("All project files; must include index.html and README.md (or README is auto-added)"),
+        })),
+        execute: async ({ projectName, files }: { projectName: string; files: ProjectFile[] }) => {
+          logger.tool("create_project", "start", `${projectName} (${files?.length ?? 0} files)`);
+          try {
+            const builder = new ProjectBuilder(projectName);
+            builder.createBatch(projectName, files);
+            // Expose builder so the verifier can patch individual files via create_file
+            activeProjectBuilder = builder;
+            const result = await builder.createZip(`${projectName}.zip`);
+            logger.tool("create_project", "success", `${result.zipPath} (${result.files.length} files)`);
+            return {
+              success: result.success,
+              projectName,
+              projectDir: result.projectDir,
+              zipPath: result.zipPath,
+              files: result.files,
+              totalSize: result.totalSize,
+              error: result.error,
+            };
+          } catch (error) {
+            logger.tool("create_project", "error", String(error));
+            throw error;
+          }
+        },
+      });
+
+      // Single-file creation — for verifier patches or legacy create_file-then-finalize flow
       tools.create_file = tool({
-        description: `Create a file for a deliverable code project (website, app, script, tool). Only use this when the job is asking for an actual downloadable project — NOT for text-based requests like writing tweets, emails, essays, or answers. Call multiple times for multi-file projects, then use finalize_project to package them.`,
+        description: `Create a single file for a deliverable code project. Prefer create_project when building a full project in one go. Use create_file for adding or patching one file (e.g. after review). Call finalize_project to package all files into a zip.`,
         inputSchema: zodSchema(z.object({
           path: z
             .string()
@@ -377,14 +416,20 @@ export class LLMClient {
     step: PipelineStep,
     options: GenerateOptions
   ): Promise<LLMResponse> {
+    // Reset builder only at pipeline start (planner); builder/verifier share the same project
+    if (step === "planner") {
+      activeProjectBuilder = null;
+    }
+
     const model = this.getModelForStep(step);
     const provider = this.getProviderForModel(model);
+    const tools = options.tools !== false ? this.getTools() : undefined;
     return this.executeGenerationWithProvider(provider, model, {
       prompt: options.prompt,
       systemPrompt: options.systemPrompt,
       maxTokens: options.maxTokens ?? this.maxTokens,
       temperature: options.temperature ?? this.temperature,
-      tools: options.tools !== false ? this.getTools() : undefined,
+      tools,
     });
   }
 
@@ -514,13 +559,15 @@ export class LLMClient {
       }
     }
 
-    // Derive projectBuild from finalize_project tool result (same as before)
+    // Derive projectBuild from tool calls.
+    // Prefer finalize_project (post-patch final zip) over create_project (initial batch zip).
     let projectBuild: ProjectBuildResult | undefined;
+
     const finalizeCall = (toolCalls ?? []).find((tc) => tc.name === "finalize_project");
     if (finalizeCall?.result) {
       const finalizeResult = finalizeCall.result as {
         success: boolean;
-        projectName: string;
+        projectName?: string;
         zipPath: string;
         files: string[];
         totalSize: number;
@@ -535,6 +582,23 @@ export class LLMClient {
           files: finalizeResult.files,
           totalSize: finalizeResult.totalSize,
         };
+      }
+    }
+
+    if (!projectBuild) {
+      const createProjectCall = (toolCalls ?? []).find((tc) => tc.name === "create_project");
+      if (createProjectCall?.result) {
+        const r = createProjectCall.result as ProjectBuildResult & { projectName?: string };
+        if (r.success && r.projectDir) {
+          projectBuild = {
+            success: true,
+            projectDir: r.projectDir,
+            zipPath: r.zipPath,
+            files: r.files ?? [],
+            totalSize: r.totalSize ?? 0,
+            error: r.error,
+          };
+        }
       }
     }
 
