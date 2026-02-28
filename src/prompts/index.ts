@@ -9,6 +9,9 @@ export {
   CDN_URLS,
 } from "./shared.js";
 
+// Import the concrete PlanTechStack type so BuilderContext stays type-safe
+import type { PlanTechStack } from "../pipeline/types.js";
+
 // ─────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────
@@ -22,7 +25,7 @@ export interface BuilderContext {
   jobPrompt: string;
   plan: {
     taskSummary: string;
-    techStack: Record<string, unknown>;
+    techStack: PlanTechStack;          // was: Record<string, unknown>
     files: { path: string; description: string }[];
     designNotes: string;
     complexityEstimate: string;
