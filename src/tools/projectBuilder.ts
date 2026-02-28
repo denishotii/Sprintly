@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, existsSync, rmSync, readdirSync, statSync, readFileSync } from "fs";
+import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from "fs";
 import { join, dirname, basename } from "path";
 import { tmpdir } from "os";
 import { randomUUID } from "crypto";
@@ -9,6 +9,82 @@ import { logger } from "../utils/logger.js";
 export interface ProjectFile {
   path: string; // Relative path within the project (e.g., "src/index.html")
   content: string; // File content
+}
+
+/** Result of validating and normalizing a file list (for batch create). */
+export type ValidateFilesResult =
+  | { ok: true; files: ProjectFile[] }
+  | { ok: false; errors: string[] };
+
+/**
+ * Normalize a relative path: forward slashes, no leading ./, no traversal or absolute.
+ * Returns the normalized path or throws if invalid.
+ */
+function normalizePath(path: string): string {
+  const p = path.replace(/\\/g, "/").trim().replace(/^\.\/+/, "") || ".";
+  if (p.startsWith("/") || p.includes("..")) {
+    throw new Error(`Invalid path: ${path}`);
+  }
+  return p === "." ? "" : p;
+}
+
+/**
+ * Validate and normalize a list of files for batch create.
+ * - Normalizes path separators and rejects path traversal / absolute paths.
+ * - Rejects empty content.
+ * - Rejects duplicate paths (after normalization).
+ */
+export function validateAndNormalizeFiles(files: ProjectFile[]): ValidateFilesResult {
+  const errors: string[] = [];
+  const seen = new Set<string>();
+  const normalized: ProjectFile[] = [];
+
+  for (let i = 0; i < files.length; i++) {
+    const { path: rawPath, content } = files[i];
+    if (typeof content !== "string" || content.trim() === "") {
+      errors.push(`File "${rawPath}" has empty content`);
+      continue;
+    }
+    let path: string;
+    try {
+      path = normalizePath(rawPath);
+    } catch {
+      errors.push(`Invalid path: "${rawPath}"`);
+      continue;
+    }
+    if (!path) {
+      errors.push(`File at index ${i} has invalid path "${rawPath}"`);
+      continue;
+    }
+    if (seen.has(path)) {
+      errors.push(`Duplicate path: ${path}`);
+      continue;
+    }
+    seen.add(path);
+    normalized.push({ path, content });
+  }
+
+  if (errors.length > 0) {
+    return { ok: false, errors };
+  }
+  return { ok: true, files: normalized };
+}
+
+/**
+ * Generate a minimal default README for a project (used when the LLM omits it).
+ */
+function defaultReadmeContent(projectName: string, filePaths: string[]): string {
+  const fileList = filePaths.length > 0 ? filePaths.map((p) => `- ${p}`).join("\n") : "- (no files)";
+  return `# ${projectName}
+
+## Files
+
+${fileList}
+
+## How to run
+
+Open \`index.html\` in any modern browser. No installation required.
+`;
 }
 
 export interface ProjectBuildResult {
@@ -45,18 +121,16 @@ export class ProjectBuilder {
    * Add a file to the project
    */
   addFile(relativePath: string, content: string): void {
-    // Normalize path separators
-    const normalizedPath = relativePath.replace(/\\/g, "/");
+    const normalizedPath = normalizePath(relativePath);
+    if (!normalizedPath) throw new Error(`Invalid file path: "${relativePath}"`);
+
     this.files.set(normalizedPath, content);
-    
-    // Write file to disk
+
     const fullPath = join(this.projectDir, normalizedPath);
     const dir = dirname(fullPath);
-    
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
-    
     writeFileSync(fullPath, content, "utf-8");
     logger.debug(`Added file: ${normalizedPath} (${content.length} bytes)`);
   }
@@ -68,6 +142,48 @@ export class ProjectBuilder {
     for (const file of files) {
       this.addFile(file.path, file.content);
     }
+  }
+
+  /**
+   * Validate, optionally inject README, and write all files in one batch.
+   * Use this for the create_project tool: one call replaces any previous content.
+   * - Rejects empty content, duplicate paths, and invalid paths.
+   * - If no README.md is in the list, appends a minimal default one.
+   * @throws Error if validation fails (with message listing all errors)
+   */
+  createBatch(projectName: string, files: ProjectFile[]): void {
+    const result = validateAndNormalizeFiles(files);
+    if (!result.ok) {
+      throw new Error(result.errors.join("; "));
+    }
+    let batch = result.files;
+    const hasReadme = batch.some((f) => f.path.toLowerCase() === "readme.md");
+    if (!hasReadme) {
+      batch = [
+        ...batch,
+        {
+          path: "README.md",
+          content: defaultReadmeContent(projectName, batch.map((f) => f.path)),
+        },
+      ];
+      logger.debug("Auto-added README.md to project");
+    }
+
+    this.files.clear();
+    const dirsCreated = new Set<string>();
+
+    for (const { path: relPath, content } of batch) {
+      this.files.set(relPath, content);
+      const fullPath = join(this.projectDir, relPath);
+      const dir = dirname(fullPath);
+      if (dir !== this.projectDir && !dirsCreated.has(dir)) {
+        mkdirSync(dir, { recursive: true });
+        dirsCreated.add(dir);
+      }
+      writeFileSync(fullPath, content, "utf-8");
+    }
+
+    logger.debug(`createBatch: wrote ${batch.length} files`);
   }
 
   /**

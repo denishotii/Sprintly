@@ -448,7 +448,7 @@ Guidelines:
 
 Responding to jobs:
 - Most jobs are asking for TEXT responses — writing, answers, advice, ideas, analysis, tweets, emails, etc. For these, just respond directly with well-written text. Do NOT create files for text-based requests.
-- Only use create_file and finalize_project when the job is genuinely asking for a deliverable code project (a website, app, script, tool, etc.) that the requester would need to download and run/open.
+- For full code projects (website, app, script, tool), prefer create_project with all files at once; use create_file and finalize_project only when adding or patching single files.
 - Use your judgment to determine what the requester actually wants. "Write me a tweet" = text response. "Build me a landing page" = file project.
 
 Job Budget: $${effectiveBudget.toFixed(2)} USD${job.jobType === "SWARM" ? ` (your share of $${job.budget.toFixed(2)} total across ${job.maxAgents} agents)` : ""}`,
