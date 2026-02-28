@@ -21,12 +21,21 @@
 The judge is an AI that reviews the zip contents. The output **must work by opening `index.html` in a browser** — no `npm install`, no build step, no server. All dependencies via CDN.
 
 ---
-The seed-agent template is a solid foundation. It already handles:
+
+### What the Starter Template Gives Us
+
 - Platform integration: Registration, verification, job polling (REST + Pusher WebSocket)
-- LLM calls: OpenRouter with retry logic + fallback to text-only
-- Project builder: create_file + finalize_project tools that write files to disk and zip them
-- File upload: Upload zip to Seedstr, submit with responseType: "FILE"
+- Project builder: `create_file` + `finalize_project` tools that write files to disk and zip them
+- File upload: Upload zip to Seedstr, submit with `responseType: "FILE"`
 - Basic tools: Web search (Tavily/DDG), calculator, code analysis meta-tool
+
+### What We're Changing
+
+- **LLM provider**: Replacing OpenRouter with **direct OpenAI + Anthropic APIs** for lower latency, better control, and access to provider-specific features (Claude's extended thinking, GPT's structured outputs)
+- **Architecture**: Adding a 3-step pipeline (plan → build → verify)
+- **Tools**: Batch file creation instead of per-file round trips
+- **Prompts**: Expert-level system prompts per pipeline step
+
 ---
 
 ## Architecture
@@ -37,7 +46,7 @@ The seed-agent template is a solid foundation. It already handles:
 └──────────────────┬──────────────────────────────────────┘
                    │
 ┌──────────────────▼──────────────────────────────────────┐
-│  STEP 1: PLANNER                              (~5s)     │
+│  STEP 1: PLANNER                                        │
 │                                                         │
 │  - Classify task: code/project vs text-only             │
 │  - If code → decide tech stack, enumerate all files     │
@@ -47,7 +56,7 @@ The seed-agent template is a solid foundation. It already handles:
 └──────────────────┬──────────────────────────────────────┘
                    │
 ┌──────────────────▼──────────────────────────────────────┐
-│  STEP 2: BUILDER                             (~30-60s)  │
+│  STEP 2: BUILDER                                        │
 │                                                         │
 │  - Takes plan + original prompt                         │
 │  - Generates ALL files in one structured response       │
@@ -59,7 +68,7 @@ The seed-agent template is a solid foundation. It already handles:
 └──────────────────┬──────────────────────────────────────┘
                    │
 ┌──────────────────▼──────────────────────────────────────┐
-│  STEP 3: VERIFIER                            (~10-15s)  │
+│  STEP 3: VERIFIER                                       │
 │                                                         │
 │  - Reviews all generated files (1 pass, capped)         │
 │  - Checks:                                              │
@@ -74,22 +83,29 @@ The seed-agent template is a solid foundation. It already handles:
 
 ### Why 3 Steps, Not More
 
-- **Speed is a judging criterion.** Every extra LLM round-trip adds 5–15s.
+- **Speed is a judging criterion.** Every extra LLM round-trip adds real latency.
 - A plan → build → verify pipeline covers all the bases without multi-agent debate overhead.
 - The verifier is capped to **1 iteration** to protect speed.
 
 ---
 
+## Tasks
+
+See **[TASKS.md](TASKS.md)** for the full task board with subtask checklists and dependency graph.
+
+---
+
 ## Design Decisions
 
-### 1. No Model Router
+### 1. Direct APIs, No Router
 
-A model router (GPT for X, Claude for Y, Llama for Z) sounds appealing but:
-- Adds latency (classification step + potential retries on each model)
-- Increases failure modes (timeouts, rate limits, inconsistent outputs)
-- No benefit for a single blind prompt
+We use **OpenAI and Anthropic SDKs directly** — no OpenRouter middleman. Benefits:
+- Lower latency (one fewer hop)
+- Access to provider-specific features (Claude extended thinking, GPT structured outputs)
+- Independent retry/fallback per provider
+- Clearer error handling
 
-**Decision:** One primary model via OpenRouter + fallback to a secondary only when the primary fails validation. Retry-with-fallback, not parallel calls.
+**Decision:** One primary model + fallback to the other provider only when the primary fails. Retry-with-fallback, not parallel calls.
 
 ### 2. Front-End Focus Over General Modes
 
@@ -132,40 +148,15 @@ The judge always gets: an entry point, clean structure, and a README.
 
 ---
 
-## Implementation Priority
+## Implementation Priority (Summary)
 
-### P0 — Must Have (do first)
+See **Task Board** above for full details and subtasks.
 
-| Task | What | Impact |
-|------|------|--------|
-| **System prompts** | Expert-level prompts for planner, builder, verifier roles in `src/prompts/` | Single biggest quality lever — tells the LLM *how* to build good front-end code |
-| **Batch file tool** | `create_project` tool that accepts `{ files: [{path, content}] }` in one call | Eliminates per-file round trips → much faster |
-| **Auto README** | Always generate `README.md` with: what was built, file structure, how to open | Floor for Functionality score |
-| **3-step pipeline** | Refactor `runner.ts` `processJob` into plan → build → verify | Better output quality and structure |
-
-### P1 — Should Have (do second)
-
-| Task | What | Impact |
-|------|------|--------|
-| **Verifier pass** | One-pass review of generated files: broken refs, missing files, HTML issues | Catches the dumb mistakes that tank Functionality score |
-| **Default design system** | CSS variables, reset, typography, color palette injected as base template | Free Design score boost — every output looks polished |
-| **Planner intelligence** | Better classification + file planning before generation | More coherent multi-file projects |
-
-### P2 — Nice to Have (if time permits)
-
-| Task | What | Impact |
-|------|------|--------|
-| **Text fallback** | Clean text-only response mode if the prompt isn't about code | Safety net |
-| **Speed optimizations** | Streaming, parallel verification, smaller prompts | Speed score |
-| **Model fallback** | Try Claude if GPT fails, or vice versa | Reliability |
-| **Design templates** | Pre-built component library (nav, hero, cards, footer) the LLM can reference | Higher design quality |
-
-### P3 — Stretch Goals
-
-| Task | What | Impact |
-|------|------|--------|
-| **Screenshot generation** | Headless browser to capture a preview image of the built site | Judge appeal |
-| **Lighthouse-style checks** | Basic accessibility + performance validation | Functionality edge case |
+| Priority | Tasks | What |
+|----------|-------|------|
+| **P0** | T1, T2, T3, T4, T5, T6 | LLM client, config, prompts, batch tool, pipeline, runner integration |
+| **P1** | T7, T8, T12 | Design system, file validation, end-to-end testing |
+| **P2** | T9, T10, T11, T13 | Text fallback, component templates, speed optimization, model fallback |
 
 ---
 
@@ -173,34 +164,43 @@ The judge always gets: an entry point, clean structure, and a README.
 
 ### Modified Files
 
-| File | Changes |
-|------|---------|
-| `src/agent/runner.ts` | Refactor `processJob` into 3-step pipeline (plan → build → verify) |
-| `src/llm/client.ts` | Add mode-aware system prompts, add `create_project` batch tool, increase `maxSteps` intelligence |
-| `src/tools/projectBuilder.ts` | Add auto-README generation, basic HTML validation, batch file support |
-| `src/config/index.ts` | Add config for planner/verifier model, prompt tuning knobs |
+| File | Changes | Task |
+|------|---------|------|
+| `src/llm/client.ts` | Replace OpenRouter with dual-provider abstraction, update tool registry | T1 |
+| `src/config/index.ts` | Add dual API key config, per-step model overrides | T2 |
+| `src/tools/projectBuilder.ts` | Add batch file support, auto-README, validation | T4, T8 |
+| `src/agent/runner.ts` | Replace `processJob` with pipeline call | T6 |
+| `src/cli/commands/simulate.ts` | Update to use full pipeline | T12 |
+| `package.json` | Swap `@openrouter/ai-sdk-provider` for `openai` + `@anthropic-ai/sdk` | T1 |
+| `.env.example` | New env vars for both providers | T2 |
 
 ### New Files
 
-| File | Purpose |
-|------|---------|
-| `src/prompts/planner.ts` | System prompt for the planner step — task classification + file planning |
-| `src/prompts/builder.ts` | System prompt for the builder — expert front-end code generation |
-| `src/prompts/verifier.ts` | System prompt for the verifier — code review + fix pass |
-| `src/prompts/index.ts` | Prompt exports + shared prompt fragments |
-| `src/templates/base.css` | Default CSS reset + design tokens (colors, typography, spacing) |
-| `src/templates/index.ts` | Template loader — injects base CSS into projects |
-| `src/pipeline/index.ts` | 3-step pipeline orchestrator (plan → build → verify) |
-| `src/pipeline/planner.ts` | Planner step implementation |
-| `src/pipeline/builder.ts` | Builder step implementation |
-| `src/pipeline/verifier.ts` | Verifier step implementation |
+| File | Purpose | Task |
+|------|---------|------|
+| `src/llm/providers/openai.ts` | OpenAI SDK wrapper | T1 |
+| `src/llm/providers/anthropic.ts` | Anthropic SDK wrapper | T1 |
+| `src/llm/providers/types.ts` | Shared `LLMProvider` interface | T1 |
+| `src/prompts/planner.ts` | Planner system prompt | T3 |
+| `src/prompts/builder.ts` | Builder system prompt | T3 |
+| `src/prompts/verifier.ts` | Verifier system prompt | T3 |
+| `src/prompts/shared.ts` | Shared prompt fragments | T3 |
+| `src/prompts/index.ts` | Prompt exports | T3 |
+| `src/pipeline/types.ts` | Pipeline type definitions | T5 |
+| `src/pipeline/planner.ts` | Planner step implementation | T5 |
+| `src/pipeline/builder.ts` | Builder step implementation | T5 |
+| `src/pipeline/verifier.ts` | Verifier step implementation | T5, T8 |
+| `src/pipeline/index.ts` | Pipeline orchestrator | T5 |
+| `src/templates/base.css` | CSS reset + design tokens | T7 |
+| `src/templates/components.css` | Utility component classes | T7 |
+| `src/templates/index.ts` | Template loader | T7 |
 
 ---
 
 ## Model Strategy
 
 ```
-Primary model (all steps)
+Primary provider (direct API)
         │
         ▼
    ┌─────────┐    success    ┌──────────┐
@@ -210,13 +210,13 @@ Primary model (all steps)
         ▼
    ┌──────────────┐   success   ┌──────────┐
    │ Retry (x3)   ├────────────►│ Continue  │
-   │ same model   │             └──────────┘
+   │ same provider │             └──────────┘
    └────┬─────────┘
         │ still failing
         ▼
    ┌──────────────┐   success   ┌──────────┐
    │ Fallback     ├────────────►│ Continue  │
-   │ alt model    │             └──────────┘
+   │ other provider│             └──────────┘
    └────┬─────────┘
         │ failure
         ▼
@@ -226,9 +226,10 @@ Primary model (all steps)
    └──────────────┘
 ```
 
-Recommended models (via OpenRouter):
-- **Primary:** `anthropic/claude-sonnet-4` — strong at code gen, fast, good tool use
-- **Fallback:** `openai/gpt-4o` — different failure modes, strong generalist
+Providers (direct API — no OpenRouter):
+- **Primary:** Anthropic `claude-sonnet-4` — strong at code gen, fast, excellent tool use
+- **Fallback:** OpenAI `gpt-4o` — different failure modes, strong structured outputs
+- Both via their official SDKs (`@anthropic-ai/sdk`, `openai`)
 
 ---
 
@@ -302,25 +303,25 @@ How each decision maps to the judging criteria:
 - Batch file creation → one round-trip instead of 10+
 - 3-step pipeline (not 5+) → minimal LLM calls
 - Verifier capped to 1 pass → no infinite loops
-- No model router overhead → direct generation
+- Direct API calls (no OpenRouter middleman) → lower latency
 
 ---
 
 ## Development Sequence
 
 ```
-Week 1 (now → Mar 2):
-  ├── Set up prompts/ directory with planner, builder, verifier prompts
-  ├── Build batch create_project tool
-  ├── Implement 3-step pipeline in runner
-  └── Test with simulated prompts (npm run simulate)
+Phase 1 — Foundation (now → Mar 2):
+  Dev A track:  T1 (LLM Client) → T2 (Config)
+  Dev B track:  T3 (Prompts) → T4 (Batch Tool)
+  Both tracks can start immediately, no conflicts.
 
-Week 2 (Mar 2 → Mar 6):
-  ├── Add verifier logic
-  ├── Add default design system / CSS template
-  ├── Tune system prompts based on test outputs
-  ├── Speed optimization pass
-  └── End-to-end testing with various prompt types
+Phase 2 — Pipeline (Mar 2 → Mar 4):
+  Together:     T5 (Pipeline Orchestrator) → T6 (Runner Integration)
+  These depend on Phase 1. Work together or split planner/builder/verifier.
+
+Phase 3 — Polish (Mar 4 → Mar 6):
+  Pick from:    T7 (Design System), T8 (Validation), T12 (Testing)
+  Then:         T9, T10, T11, T13 if time allows
 
 Mar 6–10 (prompt drops):
   ├── Agent is running, connected to Seedstr
