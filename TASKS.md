@@ -13,13 +13,17 @@ Check the **Depends on** field before starting so you don't build on something t
 
 Right now the agent calls LLMs through OpenRouter (a proxy). We want to call OpenAI and Anthropic directly for lower latency and access to each provider's unique features.
 
+**Models we're using:**
+- Anthropic: `claude-sonnet-4.6` (planner), `claude-opus-4.6` (builder)
+- OpenAI: `gpt-5.3-codex` (verifier + fallback for any step)
+
 **What to do:**
 - [ ] Install the `openai` and `@anthropic-ai/sdk` npm packages
 - [ ] Remove the `@openrouter/ai-sdk-provider` package
 - [ ] Create `src/llm/providers/types.ts` — define a shared interface that both providers implement (a `generate()` method that accepts a prompt, system prompt, tools, and returns text + tool results + token usage)
-- [ ] Create `src/llm/providers/openai.ts` — wrapper around the OpenAI SDK that implements the shared interface, including tool/function calling
-- [ ] Create `src/llm/providers/anthropic.ts` — same thing for the Anthropic SDK
-- [ ] Refactor `src/llm/client.ts` — instead of importing OpenRouter, it picks the right provider based on config and calls it through the shared interface
+- [ ] Create `src/llm/providers/openai.ts` — wrapper around the OpenAI SDK that implements the shared interface, including tool/function calling. Must work with `gpt-5.3-codex`.
+- [ ] Create `src/llm/providers/anthropic.ts` — same thing for the Anthropic SDK. Must work with both `claude-sonnet-4.6` and `claude-opus-4.6`.
+- [ ] Refactor `src/llm/client.ts` — instead of importing OpenRouter, it picks the right provider based on config and calls it through the shared interface. Support per-step model selection (planner/builder/verifier each get their own model).
 - [ ] Make sure the existing retry logic still works (retry on JSON parse errors, tool argument errors, etc.)
 - [ ] Token usage tracking should work with both providers' response formats
 
@@ -31,15 +35,18 @@ Right now the agent calls LLMs through OpenRouter (a proxy). We want to call Ope
 **Depends on:** nothing
 **Files:** `src/config/index.ts`, `.env.example`
 
-The config currently expects a single `OPENROUTER_API_KEY`. We need it to support two separate providers.
+The config currently expects a single `OPENROUTER_API_KEY`. We need it to support two separate providers with per-step model selection.
 
 **What to do:**
 - [ ] Add new env vars: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`
-- [ ] Add `PRIMARY_PROVIDER` (value: `anthropic` or `openai`) — which provider to use by default
-- [ ] Add `FALLBACK_PROVIDER` — which provider to try if the primary fails
-- [ ] Add per-step model overrides: `PLANNER_MODEL`, `BUILDER_MODEL`, `VERIFIER_MODEL` (so we can use a fast model for planning and a powerful one for building)
+- [ ] Add per-step model config:
+  - `PLANNER_MODEL=claude-sonnet-4.6` (Anthropic — fast, smart)
+  - `BUILDER_MODEL=claude-opus-4.6` (Anthropic — best quality, 128K output)
+  - `VERIFIER_MODEL=gpt-5.3-codex` (OpenAI — different perspective, code-optimized)
+- [ ] Add `FALLBACK_MODEL=gpt-5.3-codex` — used when the primary model for any step fails
+- [ ] Remove `OPENROUTER_API_KEY` from required config
 - [ ] Update `.env.example` with all new variables and clear comments
-- [ ] Startup validation: at least one API key must be provided, warn if fallback provider key is missing
+- [ ] Startup validation: at least one API key must be provided, warn if only one is set (fallback won't work cross-provider)
 
 ---
 
@@ -233,13 +240,13 @@ Test the agent with realistic prompts that are similar to what the mystery promp
 **Depends on:** T1 (dual LLM client)
 **Files:** `src/llm/client.ts`
 
-If the primary provider (e.g., Anthropic) fails even after retries, automatically switch to the fallback provider (e.g., OpenAI) for that request.
+If a step's assigned model fails even after retries, automatically switch to the fallback model (`gpt-5.3-codex` by default) for that request.
 
 **What to do:**
-- [ ] After 3 retries on the primary provider fail → try the same request on the fallback provider
+- [ ] After 3 retries on the assigned model fail → switch to the `FALLBACK_MODEL` (defaults to `gpt-5.3-codex`)
 - [ ] If the fallback also fails → fall back to text-only mode (no tools)
-- [ ] Log which provider was used for each step
-- [ ] Configurable: `FALLBACK_PROVIDER` env var, or auto-detect from which API keys are present
+- [ ] Log which provider and model was used for each step (for debugging)
+- [ ] Auto-detect available fallback from which API keys are present (if no OpenAI key, fall back to a different Anthropic model instead)
 
 ---
 

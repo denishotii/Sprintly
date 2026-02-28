@@ -35,9 +35,33 @@ export const configStore = new Conf<StoredConfig>({
 export function getConfig(): AgentConfig {
   const stored = configStore.store;
 
+    // Resolve primary provider: explicit env or infer from API keys
+    const primaryProviderEnv = process.env.PRIMARY_PROVIDER?.toLowerCase();
+    const primaryProvider: AgentConfig["primaryProvider"] =
+      primaryProviderEnv === "openai" || primaryProviderEnv === "anthropic"
+        ? primaryProviderEnv
+        : "anthropic";
+
+    const openaiApiKey = process.env.OPENAI_API_KEY ?? "";
+    const anthropicApiKey = process.env.ANTHROPIC_API_KEY ?? "";
+    const openaiModel = process.env.OPENAI_MODEL ?? "gpt-4o";
+    const anthropicModel = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-20250514";
+
+    // Model for the active provider (so existing code that reads config.model still works)
+    const model =
+      primaryProvider === "openai" ? openaiModel : anthropicModel;
+
+    // Pipeline per-step models (fallback to default model when not set)
+    const defaultModel = primaryProvider === "openai" ? openaiModel : anthropicModel;
+    const plannerModel = process.env.PLANNER_MODEL ?? defaultModel;
+    const builderModel = process.env.BUILDER_MODEL ?? defaultModel;
+    const verifierModel = process.env.VERIFIER_MODEL ?? defaultModel;
+
   return {
     // API Keys
     openrouterApiKey: process.env.OPENROUTER_API_KEY || "",
+    openaiApiKey,
+    anthropicApiKey,
     seedstrApiKey: process.env.SEEDSTR_API_KEY || stored.seedstrApiKey || "",
     tavilyApiKey: process.env.TAVILY_API_KEY || "",
 
@@ -45,8 +69,16 @@ export function getConfig(): AgentConfig {
     solanaWalletAddress:
       process.env.SOLANA_WALLET_ADDRESS || stored.walletAddress || "",
 
-    // Model settings
-    model: process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4",
+    // LLM provider (direct API)
+    primaryProvider,
+    openaiModel,
+    anthropicModel,
+    plannerModel,
+    builderModel,
+    verifierModel,
+
+    // Model settings (active provider's model)
+    model,
     maxTokens: parseInt(process.env.MAX_TOKENS || "4096", 10),
     temperature: parseFloat(process.env.TEMPERATURE || "0.7"),
 
@@ -85,13 +117,23 @@ export function getConfig(): AgentConfig {
 }
 
 /**
- * Validate that required configuration is present
+ * Validate that required configuration is present.
+ * For LLM: at least the primary provider's API key is required (OPENAI_API_KEY or ANTHROPIC_API_KEY).
  */
 export function validateConfig(config: AgentConfig): string[] {
   const errors: string[] = [];
 
-  if (!config.openrouterApiKey) {
-    errors.push("OPENROUTER_API_KEY is required");
+  const hasOpenAI = !!config.openaiApiKey?.trim();
+  const hasAnthropic = !!config.anthropicApiKey?.trim();
+
+  if (config.primaryProvider === "openai" && !hasOpenAI) {
+    errors.push("OPENAI_API_KEY is required when PRIMARY_PROVIDER=openai");
+  }
+  if (config.primaryProvider === "anthropic" && !hasAnthropic) {
+    errors.push("ANTHROPIC_API_KEY is required when PRIMARY_PROVIDER=anthropic");
+  }
+  if (!hasOpenAI && !hasAnthropic) {
+    errors.push("At least one of OPENAI_API_KEY or ANTHROPIC_API_KEY is required");
   }
 
   if (!config.solanaWalletAddress) {

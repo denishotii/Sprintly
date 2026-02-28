@@ -160,16 +160,31 @@ export interface ApiError {
 // Agent Configuration Types
 // ===========================================
 
+export type LLMProviderName = "openai" | "anthropic";
+
 export interface AgentConfig {
   // API Keys
+  /** @deprecated Use openaiApiKey / anthropicApiKey and primaryProvider instead */
   openrouterApiKey: string;
+  openaiApiKey: string;
+  anthropicApiKey: string;
   seedstrApiKey?: string;
   tavilyApiKey?: string;
 
   // Wallet
   solanaWalletAddress: string;
 
-  // Model settings
+  // LLM provider (direct API — no OpenRouter)
+  primaryProvider: LLMProviderName;
+  openaiModel: string;
+  anthropicModel: string;
+
+  // Pipeline per-step models (planner → builder → verifier). Model IDs: claude-* = Anthropic, gpt-* = OpenAI.
+  plannerModel: string;
+  builderModel: string;
+  verifierModel: string;
+
+  // Model settings (used by active provider)
   model: string;
   maxTokens: number;
   temperature: number;

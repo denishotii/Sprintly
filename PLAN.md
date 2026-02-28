@@ -199,8 +199,25 @@ See **Task Board** above for full details and subtasks.
 
 ## Model Strategy
 
+Each pipeline step uses a specific model chosen for that step's job. Both providers accessed via direct SDKs (`@anthropic-ai/sdk`, `openai`) — no OpenRouter.
+
+### Per-Step Model Assignment
+
+| Step | Model | Provider | Why |
+|------|-------|----------|-----|
+| **Planner** | `claude-sonnet-4.6` | Anthropic | Fast (120 tok/s), smart, great at task classification. Output is small (~500 tokens) so speed is near-instant. |
+| **Builder** | `claude-opus-4.6` | Anthropic | Best code quality available (SWE-bench leader), 128K max output tokens for large multi-file projects, best system prompt adherence for complex frontend constraints. |
+| **Verifier** | `gpt-5.3-codex` | OpenAI | Different model family catches blind spots Claude might miss. Code-optimized, fast. |
+| **Fallback (any step)** | `gpt-5.3-codex` | OpenAI | If Anthropic is down or rate-limited, Codex takes over. |
+
+### Why Two Providers
+
+Using a different model family for verification is intentional — it's like having a second person proofread rather than asking the author to check their own work. Claude builds, Codex reviews. Different reasoning = catches different issues.
+
+### Fallback Flow
+
 ```
-Primary provider (direct API)
+Step's assigned model
         │
         ▼
    ┌─────────┐    success    ┌──────────┐
@@ -210,7 +227,7 @@ Primary provider (direct API)
         ▼
    ┌──────────────┐   success   ┌──────────┐
    │ Retry (x3)   ├────────────►│ Continue  │
-   │ same provider │             └──────────┘
+   │ same model    │             └──────────┘
    └────┬─────────┘
         │ still failing
         ▼
@@ -226,10 +243,11 @@ Primary provider (direct API)
    └──────────────┘
 ```
 
-Providers (direct API — no OpenRouter):
-- **Primary:** Anthropic `claude-sonnet-4` — strong at code gen, fast, excellent tool use
-- **Fallback:** OpenAI `gpt-4o` — different failure modes, strong structured outputs
-- Both via their official SDKs (`@anthropic-ai/sdk`, `openai`)
+### Budget
+
+- **Anthropic credits:** $500 available (~160 full pipeline runs with Opus builder)
+- **OpenAI credits:** $2,500 available (thousands of Codex runs)
+- Both expire in 6 months — plenty of runway for development + competition
 
 ---
 
@@ -304,6 +322,7 @@ How each decision maps to the judging criteria:
 - 3-step pipeline (not 5+) → minimal LLM calls
 - Verifier capped to 1 pass → no infinite loops
 - Direct API calls (no OpenRouter middleman) → lower latency
+- Sonnet for planning (fast), Opus for building (quality), Codex for verifying (fast + different perspective)
 
 ---
 
