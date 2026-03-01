@@ -14,6 +14,14 @@ dotenvConfig({ path: resolve(__dirname, "../../.env") });
 // Also try loading from current working directory as fallback
 dotenvConfig();
 
+/** Anthropic API expects e.g. claude-sonnet-4-6 not claude-sonnet-4.6; normalize dot to hyphen. */
+function normalizeAnthropicModelId(modelId: string): string {
+  if (modelId.startsWith("claude-") && modelId.includes(".6")) {
+    return modelId.replace(".6", "-6");
+  }
+  return modelId;
+}
+
 // Persistent config store for API keys and agent info
 export const configStore = new Conf<StoredConfig>({
   projectName: "seed-agent",
@@ -53,9 +61,9 @@ export function getConfig(): AgentConfig {
 
     // Pipeline per-step models (fallback to default model when not set)
     const defaultModel = primaryProvider === "openai" ? openaiModel : anthropicModel;
-    const plannerModel = process.env.PLANNER_MODEL ?? defaultModel;
-    const builderModel = process.env.BUILDER_MODEL ?? defaultModel;
-    const verifierModel = process.env.VERIFIER_MODEL ?? defaultModel;
+    const plannerModel = normalizeAnthropicModelId(process.env.PLANNER_MODEL ?? defaultModel);
+    const builderModel = normalizeAnthropicModelId(process.env.BUILDER_MODEL ?? defaultModel);
+    const verifierModel = normalizeAnthropicModelId(process.env.VERIFIER_MODEL ?? defaultModel);
 
   return {
     // API Keys

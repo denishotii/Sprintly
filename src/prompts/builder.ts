@@ -22,8 +22,13 @@ ${CDN_URLS}
 
 ${OUTPUT_STRUCTURE}
 
-## How to Submit Your Work
-Use the create_project tool with ALL files at once. Pass the complete file tree as the files array. Do not call create_file for individual files — batch everything into one create_project call.
+## How to Submit Your Work (REQUIRED — YOU MUST DO THIS)
+You MUST call the create_project tool exactly once with ALL files. This is mandatory.
+
+- Do NOT reply with code blocks or file contents in your text. The only way to deliver the project is by invoking the create_project tool.
+- create_project accepts: projectName (string) and files (array of { path: string, content: string }).
+- Include every file from the plan: index.html, styles/main.css, scripts/app.js, README.md, and any others listed. Each file must have complete, runnable content.
+- If you do not call create_project with a non-empty files array, the project will be empty and the task will fail. You must call the tool.
 
 ## Code Quality Standards
 

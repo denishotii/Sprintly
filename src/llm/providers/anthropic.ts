@@ -35,12 +35,14 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): LLMPro
         temperature,
         tools,
         model: modelOverride,
+        toolChoice,
       } = params;
 
       const effectiveModel = modelOverride ?? modelId;
       const hasTools = tools && Object.keys(tools).length > 0;
+      const resolvedToolChoice = toolChoice === "required" ? "required" : toolChoice === "none" ? "none" : undefined;
 
-      logger.debug(`Anthropic generate: model=${effectiveModel}, hasTools=${hasTools}`);
+      logger.debug(`Anthropic generate: model=${effectiveModel}, hasTools=${hasTools}, toolChoice=${resolvedToolChoice ?? "auto"}`);
 
       const result = await generateText({
         model: anthropic(effectiveModel) as unknown as LanguageModel,
@@ -49,6 +51,7 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): LLMPro
         maxOutputTokens: maxTokens,
         temperature,
         tools: hasTools ? tools : undefined,
+        toolChoice: hasTools && resolvedToolChoice ? resolvedToolChoice : undefined,
         onStepFinish: (step) => {
           logger.debug(
             `Anthropic step finished - finishReason: ${step.finishReason}, toolCalls: ${step.toolCalls?.length ?? 0}`

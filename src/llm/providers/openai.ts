@@ -35,12 +35,14 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): LLMProvider 
         temperature,
         tools,
         model: modelOverride,
+        toolChoice,
       } = params;
 
       const effectiveModel = modelOverride ?? modelId;
       const hasTools = tools && Object.keys(tools).length > 0;
+      const resolvedToolChoice = toolChoice === "required" ? "required" : toolChoice === "none" ? "none" : undefined;
 
-      logger.debug(`OpenAI generate: model=${effectiveModel}, hasTools=${hasTools}`);
+      logger.debug(`OpenAI generate: model=${effectiveModel}, hasTools=${hasTools}, toolChoice=${resolvedToolChoice ?? "auto"}`);
 
       const result = await generateText({
         model: openai(effectiveModel) as unknown as LanguageModel,
@@ -49,6 +51,7 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): LLMProvider 
         maxOutputTokens: maxTokens,
         temperature,
         tools: hasTools ? tools : undefined,
+        toolChoice: hasTools && resolvedToolChoice ? resolvedToolChoice : undefined,
         onStepFinish: (step) => {
           logger.debug(
             `OpenAI step finished - finishReason: ${step.finishReason}, toolCalls: ${step.toolCalls?.length ?? 0}`

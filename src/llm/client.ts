@@ -115,7 +115,12 @@ export interface GenerateOptions {
   systemPrompt?: string;
   maxTokens?: number;
   temperature?: number;
+  /** true = all tools, false = no tools. For pipeline builder step we pass only project tools and toolChoice: 'required'. */
   tools?: boolean;
+  /** Force the model to call a tool (e.g. create_project). Used for builder step. */
+  toolChoice?: "auto" | "required" | "none";
+  /** When 'builder', only create_project, create_file, finalize_project are passed so the model is not distracted by web_search/calculator. */
+  toolsFilter?: "all" | "builder";
 }
 
 /** Pipeline step names; each can use its own model (see config plannerModel, builderModel, verifierModel). */
@@ -213,9 +218,10 @@ export class LLMClient {
   }
 
   /**
-   * Get available tools based on configuration
+   * Get available tools based on configuration.
+   * @param filter - 'all' (default) returns every enabled tool; 'builder' returns only create_project, create_file, finalize_project for the pipeline builder step.
    */
-  private getTools(): Record<string, Tool> {
+  private getTools(filter?: "all" | "builder"): Record<string, Tool> {
     const config = getConfig();
     const tools: Record<string, Tool> = {};
 
@@ -405,6 +411,15 @@ export class LLMClient {
       });
     }
 
+    if (filter === "builder") {
+      const builderToolNames = ["create_project", "create_file", "finalize_project"];
+      const filtered: Record<string, Tool> = {};
+      for (const name of builderToolNames) {
+        if (tools[name]) filtered[name] = tools[name];
+      }
+      return filtered;
+    }
+
     return tools;
   }
 
@@ -423,13 +438,16 @@ export class LLMClient {
 
     const model = this.getModelForStep(step);
     const provider = this.getProviderForModel(model);
-    const tools = options.tools !== false ? this.getTools() : undefined;
+    const toolsFilter = options.toolsFilter ?? (step === "builder" ? "builder" : "all");
+    const tools = options.tools !== false ? this.getTools(toolsFilter) : undefined;
+    const toolChoice = options.toolChoice ?? (step === "builder" && tools ? "required" : undefined);
     return this.executeGenerationWithProvider(provider, model, {
       prompt: options.prompt,
       systemPrompt: options.systemPrompt,
       maxTokens: options.maxTokens ?? this.maxTokens,
       temperature: options.temperature ?? this.temperature,
       tools,
+      toolChoice,
     });
   }
 
@@ -537,9 +555,10 @@ export class LLMClient {
       maxTokens: number;
       temperature: number;
       tools?: Record<string, Tool>;
+      toolChoice?: "auto" | "required" | "none";
     }
   ): Promise<LLMResponse> {
-    const { prompt, systemPrompt, maxTokens, temperature, tools } = params;
+    const { prompt, systemPrompt, maxTokens, temperature, tools, toolChoice } = params;
 
     const result = await provider.generate({
       prompt,
@@ -547,6 +566,7 @@ export class LLMClient {
       maxTokens,
       temperature,
       tools,
+      toolChoice,
       model: modelOverride,
     });
 

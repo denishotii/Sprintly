@@ -132,10 +132,21 @@ export interface PipelineResult {
   totalUsage: StepUsage;
 }
 
+/** Step names for progress reporting. */
+export type PipelineStepName = "planner" | "builder" | "verifier" | "zip";
+
+/** Optional progress callback — invoked after each step completes (for TUI/events). */
+export type PipelineStepCallback = (
+  step: PipelineStepName,
+  data: { durationMs: number; fileCount?: number; issuesCount?: number }
+) => void;
+
 /** Options for the pipeline orchestrator. */
 export interface PipelineOptions {
   /** The raw job prompt from Seedstr. */
   jobPrompt: string;
   /** Job budget in USD (passed to the Planner for context). */
   budget?: number;
+  /** Called after each step completes; use for progress events. */
+  onStepComplete?: PipelineStepCallback;
 }

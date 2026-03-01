@@ -33,6 +33,8 @@ export interface ProviderGenerateParams {
   tools?: Record<string, import("ai").Tool>;
   /** Override model for this call (e.g. per-step: planner, builder, verifier). When set, provider uses this instead of its default. */
   model?: string;
+  /** Tool choice: 'auto' | 'required' | 'none' or { type: 'tool', toolName: string }. Use 'required' for builder step so the model must call create_project. */
+  toolChoice?: "auto" | "required" | "none" | { type: "tool"; toolName: string };
 }
 
 /**

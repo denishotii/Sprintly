@@ -114,7 +114,7 @@ export async function runBuilder(
     prompt: userMessage,
     systemPrompt: BUILDER_SYSTEM_PROMPT,
     tools: true, // create_project, create_file, finalize_project are available
-    maxTokens: 16000, // Large output — multi-file projects can be big
+    maxTokens: 128000, // API max output (e.g. Opus 128K). Full create_project with many files needs headroom; 1M is context-window (input), not output limit.
     temperature: 0.4, // Low-ish for consistent code, slight room for creativity
   });
 
@@ -123,13 +123,20 @@ export async function runBuilder(
 
   if (result.toolCalls && result.toolCalls.length > 0) {
     files = extractFilesFromToolCalls(result.toolCalls);
-    logger.debug(`Builder: extracted ${files.length} file(s) from tool calls`);
+    const names = result.toolCalls.map((tc) => tc.name).join(", ");
+    logger.debug(`Builder: ${result.toolCalls.length} tool call(s) [${names}] → ${files.length} file(s) extracted`);
+    for (const tc of result.toolCalls) {
+      if (tc.name === "create_project") {
+        const rawFiles = (tc.args?.files as unknown[]) ?? [];
+        logger.debug(`Builder: create_project args.files.length=${rawFiles.length}`);
+      }
+    }
+  } else {
+    logger.warn("Builder: no tool calls in LLM response — model must call create_project with all files");
   }
 
-  // If no files came from tools, the LLM may have output raw code in text.
-  // We don't try to parse free-form text into files — log a warning and continue.
   if (files.length === 0) {
-    logger.warn("Builder: no files extracted from tool calls — project will be empty");
+    logger.warn("Builder: no files extracted — project will be empty. Ensure the model calls create_project with a non-empty files array.");
   }
 
   // Ensure README.md exists

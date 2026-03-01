@@ -2,10 +2,11 @@ import { EventEmitter } from "events";
 import Conf from "conf";
 import PusherClient from "pusher-js";
 import { SeedstrClient } from "../api/client.js";
-import { getLLMClient } from "../llm/client.js";
 import { getConfig, configStore } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { cleanupProject } from "../tools/projectBuilder.js";
+import { runPipeline } from "../pipeline/index.js";
+import type { PipelineStepName } from "../pipeline/types.js";
 import type { Job, AgentEvent, TokenUsage, FileAttachment, WebSocketJobEvent } from "../types/index.js";
 
 // Approximate costs per 1M tokens for common models (input/output)
@@ -419,7 +420,7 @@ export class AgentRunner extends EventEmitter implements TypedEventEmitter {
   // ─────────────────────────────────────────
 
   /**
-   * Process a single job
+   * Process a single job using the Planner → Builder → Verifier pipeline.
    * @param useV2Submit - If true, use v2 respond endpoint (for swarm auto-pay)
    */
   private async processJob(job: Job, useV2Submit = false): Promise<void> {
@@ -427,99 +428,79 @@ export class AgentRunner extends EventEmitter implements TypedEventEmitter {
     this.emitEvent({ type: "job_processing", job });
 
     try {
-      // Generate response using LLM
-      const llm = getLLMClient();
       const config = getConfig();
+      const effectiveBudget =
+        job.jobType === "SWARM" && job.budgetPerAgent ? job.budgetPerAgent : job.budget;
 
-      const effectiveBudget = job.jobType === "SWARM" && job.budgetPerAgent
-        ? job.budgetPerAgent
-        : job.budget;
-
-      const result = await llm.generate({
-        prompt: job.prompt,
-        systemPrompt: `You are an AI agent participating in the Seedstr marketplace. Your task is to provide the best possible response to job requests.
-
-Guidelines:
-- Be helpful, accurate, and thorough
-- Use tools when needed to get current information
-- Provide well-structured, clear responses
-- Be professional and concise
-- If you use web search, cite your sources
-
-Responding to jobs:
-- Most jobs are asking for TEXT responses — writing, answers, advice, ideas, analysis, tweets, emails, etc. For these, just respond directly with well-written text. Do NOT create files for text-based requests.
-- For full code projects (website, app, script, tool), prefer create_project with all files at once; use create_file and finalize_project only when adding or patching single files.
-- Use your judgment to determine what the requester actually wants. "Write me a tweet" = text response. "Build me a landing page" = file project.
-
-Job Budget: $${effectiveBudget.toFixed(2)} USD${job.jobType === "SWARM" ? ` (your share of $${job.budget.toFixed(2)} total across ${job.maxAgents} agents)` : ""}`,
-        tools: true,
+      const result = await runPipeline({
+        jobPrompt: job.prompt,
+        budget: effectiveBudget,
+        onStepComplete: (step: PipelineStepName, data) => {
+          const { durationMs, fileCount, issuesCount } = data;
+          if (step === "planner") {
+            this.emitEvent({ type: "plan_complete", job, durationMs });
+          } else if (step === "builder") {
+            this.emitEvent({ type: "build_complete", job, durationMs, fileCount });
+          } else if (step === "verifier") {
+            this.emitEvent({ type: "verify_complete", job, durationMs, issuesCount });
+          }
+          // zip step: no separate event; project_built covers it
+        },
       });
 
-      // Track token usage
+      // Track token usage (use builder model as representative for pipeline cost)
+      const modelForCost = config.builderModel || config.model;
       let usage: TokenUsage | undefined;
-      if (result.usage) {
+      if (result.totalUsage && (result.totalUsage.promptTokens > 0 || result.totalUsage.completionTokens > 0)) {
         const cost = estimateCost(
-          config.model,
-          result.usage.promptTokens,
-          result.usage.completionTokens
+          modelForCost,
+          result.totalUsage.promptTokens,
+          result.totalUsage.completionTokens
         );
         usage = {
-          promptTokens: result.usage.promptTokens,
-          completionTokens: result.usage.completionTokens,
-          totalTokens: result.usage.totalTokens,
+          promptTokens: result.totalUsage.promptTokens,
+          completionTokens: result.totalUsage.completionTokens,
+          totalTokens: result.totalUsage.totalTokens,
           estimatedCost: cost,
         };
-
-        // Update cumulative stats
-        this.stats.totalPromptTokens += result.usage.promptTokens;
-        this.stats.totalCompletionTokens += result.usage.completionTokens;
-        this.stats.totalTokens += result.usage.totalTokens;
+        this.stats.totalPromptTokens += result.totalUsage.promptTokens;
+        this.stats.totalCompletionTokens += result.totalUsage.completionTokens;
+        this.stats.totalTokens += result.totalUsage.totalTokens;
         this.stats.totalCost += cost;
       }
 
       this.emitEvent({
         type: "response_generated",
         job,
-        preview: result.text.substring(0, 200),
+        preview: result.textResponse.substring(0, 200),
         usage,
       });
 
-      // Check if a project was built
-      if (result.projectBuild && result.projectBuild.success) {
-        const { projectBuild } = result;
-
+      if (result.mode === "code" && result.zipPath && result.projectDir) {
+        const fileList = result.files?.map((f) => f.path) ?? [];
         this.emitEvent({
           type: "project_built",
           job,
-          files: projectBuild.files,
-          zipPath: projectBuild.zipPath,
+          files: fileList,
+          zipPath: result.zipPath,
         });
 
         try {
-          // Upload the zip file
-          this.emitEvent({
-            type: "files_uploading",
-            job,
-            fileCount: 1,
-          });
+          this.emitEvent({ type: "files_uploading", job, fileCount: 1 });
+          const uploadedFiles = await this.client.uploadFile(result.zipPath);
+          this.emitEvent({ type: "files_uploaded", job, files: [uploadedFiles] });
 
-          const uploadedFiles = await this.client.uploadFile(projectBuild.zipPath);
-
-          this.emitEvent({
-            type: "files_uploaded",
-            job,
-            files: [uploadedFiles],
-          });
-
-          // Submit response with file attachment
           let submitResult;
           if (useV2Submit) {
             submitResult = await this.client.submitResponseV2(
-              job.id, result.text, "FILE", [uploadedFiles]
+              job.id,
+              result.textResponse,
+              "FILE",
+              [uploadedFiles]
             );
           } else {
             submitResult = await this.client.submitResponseWithFiles(job.id, {
-              content: result.text,
+              content: result.textResponse,
               responseType: "FILE",
               files: [uploadedFiles],
             });
@@ -531,39 +512,30 @@ Job Budget: $${effectiveBudget.toFixed(2)} USD${job.jobType === "SWARM" ? ` (you
             responseId: submitResult.response.id,
             hasFiles: true,
           });
-
-          // Cleanup project files
-          cleanupProject(projectBuild.projectDir, projectBuild.zipPath);
         } catch (uploadError) {
-          // If upload fails, fall back to text-only response
           logger.error("Failed to upload project files, submitting text-only response:", uploadError);
-
           let submitResult;
           if (useV2Submit) {
-            submitResult = await this.client.submitResponseV2(job.id, result.text);
+            submitResult = await this.client.submitResponseV2(job.id, result.textResponse);
           } else {
-            submitResult = await this.client.submitResponse(job.id, result.text);
+            submitResult = await this.client.submitResponse(job.id, result.textResponse);
           }
-
           this.emitEvent({
             type: "response_submitted",
             job,
             responseId: submitResult.response.id,
             hasFiles: false,
           });
-
-          // Still cleanup
-          cleanupProject(projectBuild.projectDir, projectBuild.zipPath);
+        } finally {
+          cleanupProject(result.projectDir!, result.zipPath);
         }
       } else {
-        // Text-only response
         let submitResult;
         if (useV2Submit) {
-          submitResult = await this.client.submitResponseV2(job.id, result.text);
+          submitResult = await this.client.submitResponseV2(job.id, result.textResponse);
         } else {
-          submitResult = await this.client.submitResponse(job.id, result.text);
+          submitResult = await this.client.submitResponse(job.id, result.textResponse);
         }
-
         this.emitEvent({
           type: "response_submitted",
           job,

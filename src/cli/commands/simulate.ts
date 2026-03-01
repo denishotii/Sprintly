@@ -1,9 +1,14 @@
 import chalk from "chalk";
+import { copyFileSync, mkdirSync, existsSync } from "fs";
+import { join } from "path";
 import ora from "ora";
 import prompts from "prompts";
 import { getConfig } from "../../config/index.js";
-import { getLLMClient } from "../../llm/client.js";
 import { cleanupProject } from "../../tools/projectBuilder.js";
+import { runPipeline } from "../../pipeline/index.js";
+import { validateFiles } from "../../pipeline/verifier.js";
+import { getTestPrompt, E2E_PROMPT_KEYS } from "./e2e-prompts.js";
+import type { PipelineStepName } from "../../pipeline/types.js";
 import type { Job, TokenUsage } from "../../types/index.js";
 
 const MODEL_COSTS: Record<string, { input: number; output: number }> = {
@@ -25,10 +30,38 @@ function estimateCost(model: string, promptTokens: number, completionTokens: num
   return (promptTokens / 1_000_000) * costs.input + (completionTokens / 1_000_000) * costs.output;
 }
 
+const BUILDS_DIR = "builds";
+
+function slugifyForFilename(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .substring(0, 36)
+    .replace(/-$/, "") || "project";
+}
+
+/** Copy the built zip into project builds/ folder for easy review. Returns the path where it was saved. */
+function copyZipToBuilds(sourceZipPath: string, prompt: string): string {
+  const dir = join(process.cwd(), BUILDS_DIR);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+  const slug = slugifyForFilename(prompt);
+  const timestamp = Date.now();
+  const filename = `${timestamp}_${slug}.zip`;
+  const destPath = join(dir, filename);
+  copyFileSync(sourceZipPath, destPath);
+  return destPath;
+}
+
 interface SimulateOptions {
   budget?: string;
   prompt?: string;
   jobType?: string;
+  /** Predefined E2E test key (portfolio|taskapp|weather|landing|quiz). Runs pipeline and verifies zip structure. */
+  test?: string;
 }
 
 export async function simulateCommand(options: SimulateOptions): Promise<void> {
@@ -47,7 +80,20 @@ export async function simulateCommand(options: SimulateOptions): Promise<void> {
 
   let budget = options.budget ? parseFloat(options.budget) : NaN;
   let prompt = options.prompt;
+  const testKey = options.test;
   const jobType = (options.jobType?.toUpperCase() === "SWARM" ? "SWARM" : "STANDARD") as Job["jobType"];
+
+  if (testKey) {
+    const testPrompt = getTestPrompt(testKey);
+    if (!testPrompt) {
+      console.log(chalk.red(`Unknown test key: ${testKey}`));
+      console.log(chalk.gray(`Available: ${E2E_PROMPT_KEYS.join(", ")}`));
+      process.exit(1);
+    }
+    prompt = testPrompt;
+    if (isNaN(budget)) budget = 5;
+    console.log(chalk.cyan(`  E2E test: ${testKey} → "${prompt}"\n`));
+  }
 
   if (isNaN(budget)) {
     const response = await prompts({
@@ -79,6 +125,8 @@ export async function simulateCommand(options: SimulateOptions): Promise<void> {
     }
   }
 
+  const isE2ETest = !!testKey;
+
   const fakeJob: Job = {
     id: `sim_${Date.now()}`,
     prompt,
@@ -105,73 +153,93 @@ export async function simulateCommand(options: SimulateOptions): Promise<void> {
   console.log(chalk.gray("  Prompt:   ") + chalk.white(prompt.length > 80 ? prompt.substring(0, 80) + "..." : prompt));
   console.log(chalk.cyan("─".repeat(60)));
 
-  const effectiveBudget = fakeJob.jobType === "SWARM" && fakeJob.budgetPerAgent
-    ? fakeJob.budgetPerAgent
-    : fakeJob.budget;
-
-    const systemPrompt = `You are an AI agent participating in the Seedstr marketplace. Your task is to provide the best possible response to job requests.
-
-Guidelines:
-- Be helpful, accurate, and thorough
-- Use tools when needed to get current information
-- Provide well-structured, clear responses
-- Be professional and concise
-- If you use web search, cite your sources
-
-Responding to jobs:
-- Most jobs are asking for TEXT responses — writing, answers, advice, ideas, analysis, tweets, emails, etc. For these, just respond directly with well-written text. Do NOT create files for text-based requests.
-- For full code projects (website, app, script, tool), prefer create_project with all files at once; use create_file and finalize_project only when adding or patching single files.
-- Use your judgment to determine what the requester actually wants. "Write me a tweet" = text response. "Build me a landing page" = file project.
-
-Job Budget: $${effectiveBudget.toFixed(2)} USD${fakeJob.jobType === "SWARM" ? ` (your share of $${fakeJob.budget.toFixed(2)} total across ${fakeJob.maxAgents} agents)` : ""}`;
+  const effectiveBudget =
+    fakeJob.jobType === "SWARM" && fakeJob.budgetPerAgent ? fakeJob.budgetPerAgent : fakeJob.budget;
 
   const spinner = ora({
-    text: "Processing job with LLM...",
+    text: "Running pipeline (Planner → Builder → Verifier)...",
     color: "cyan",
   }).start();
 
   const startTime = Date.now();
+  const stepLabels: Record<PipelineStepName, string> = {
+    planner: "Planner",
+    builder: "Builder",
+    verifier: "Verifier",
+    zip: "Zipping",
+  };
 
   try {
-    const llm = getLLMClient();
-    const result = await llm.generate({
-      prompt: fakeJob.prompt,
-      systemPrompt,
-      tools: true,
+    const result = await runPipeline({
+      jobPrompt: fakeJob.prompt,
+      budget: effectiveBudget,
+      onStepComplete: (step) => {
+        spinner.text = `Pipeline: ${stepLabels[step]} done...`;
+      },
     });
 
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    spinner.succeed(`Response generated in ${elapsed}s`);
+    const elapsedMs = Date.now() - startTime;
+    const elapsed = (elapsedMs / 1000).toFixed(1);
+    spinner.succeed(`Pipeline complete in ${elapsed}s`);
 
-    // Token usage
+    // Token usage (same as runner: use builder model for cost)
+    const modelForCost = config.builderModel || config.model;
     let usage: TokenUsage | undefined;
-    if (result.usage) {
-      const cost = estimateCost(config.model, result.usage.promptTokens, result.usage.completionTokens);
+    if (
+      result.totalUsage &&
+      (result.totalUsage.promptTokens > 0 || result.totalUsage.completionTokens > 0)
+    ) {
+      const cost = estimateCost(
+        modelForCost,
+        result.totalUsage.promptTokens,
+        result.totalUsage.completionTokens
+      );
       usage = {
-        promptTokens: result.usage.promptTokens,
-        completionTokens: result.usage.completionTokens,
-        totalTokens: result.usage.totalTokens,
+        promptTokens: result.totalUsage.promptTokens,
+        completionTokens: result.totalUsage.completionTokens,
+        totalTokens: result.totalUsage.totalTokens,
         estimatedCost: cost,
       };
     }
 
-    // Tool calls summary
-    if (result.toolCalls && result.toolCalls.length > 0) {
-      console.log(chalk.cyan("\n📦 Tool Calls:"));
-      for (const tc of result.toolCalls) {
-        const argsPreview = JSON.stringify(tc.args).substring(0, 80);
-        console.log(chalk.gray(`  • ${tc.name}`) + chalk.dim(` (${argsPreview}${JSON.stringify(tc.args).length > 80 ? "..." : ""})`));
+    // Pipeline timing summary
+    if (result.timings?.length) {
+      console.log(chalk.cyan("\n⏱  Pipeline steps:"));
+      for (const t of result.timings) {
+        console.log(chalk.gray(`  ${t.step}: ${t.durationMs}ms`));
       }
+      console.log(chalk.gray(`  Total: ${elapsedMs}ms`));
     }
 
-    // Project build info
-    if (result.projectBuild && result.projectBuild.success) {
+    // Project build info (code mode)
+    if (result.mode === "code" && result.zipPath && result.projectDir && result.files) {
+      const fileList = result.files.map((f) => f.path);
+      const totalSize = result.files.reduce((sum, f) => sum + Buffer.byteLength(f.content, "utf-8"), 0);
+      const savedPath = copyZipToBuilds(result.zipPath, prompt);
       console.log(chalk.cyan("\n📁 Project Built:"));
-      console.log(chalk.gray(`  Zip: ${result.projectBuild.zipPath}`));
-      console.log(chalk.gray(`  Files: ${result.projectBuild.files.join(", ")}`));
-      console.log(chalk.gray(`  Size: ${(result.projectBuild.totalSize / 1024).toFixed(1)} KB`));
-      console.log(chalk.yellow(`\n  Project files saved locally (not uploaded).`));
-      console.log(chalk.gray(`  In production, this zip would be uploaded and submitted with the response.`));
+      console.log(chalk.gray(`  Zip:   ${result.zipPath}`));
+      console.log(chalk.green(`  Saved: ${savedPath}`));
+      console.log(chalk.gray(`  Files: ${fileList.join(", ")}`));
+      console.log(chalk.gray(`  Size:  ${(totalSize / 1024).toFixed(1)} KB`));
+      console.log(chalk.yellow(`\n  Project saved locally (not uploaded).`));
+      console.log(chalk.gray(`  In production, this zip would be uploaded and submitted.`));
+
+      // T12: verify zip structure (index.html, README, no broken refs)
+      if (isE2ETest) {
+        const validation = validateFiles(result.files);
+        console.log(chalk.cyan("\n🔍 Structure verification:"));
+        if (validation.passed) {
+          console.log(chalk.green("  ✓ index.html present"));
+          console.log(chalk.green("  ✓ README.md present with content"));
+          console.log(chalk.green("  ✓ No empty files"));
+          console.log(chalk.green("  ✓ HTML structure and local references OK"));
+        } else {
+          console.log(chalk.red("  Issues found:"));
+          for (const issue of validation.issues) {
+            console.log(chalk.red(`  • ${issue}`));
+          }
+        }
+      }
     }
 
     // Token usage display
@@ -187,26 +255,27 @@ Job Budget: $${effectiveBudget.toFixed(2)} USD${fakeJob.jobType === "SWARM" ? ` 
     console.log(chalk.cyan("\n" + "═".repeat(60)));
     console.log(chalk.cyan.bold("  Agent Response"));
     console.log(chalk.cyan("═".repeat(60)) + "\n");
-    console.log(result.text);
+    console.log(result.textResponse);
     console.log(chalk.cyan("\n" + "═".repeat(60)));
 
     // Summary
     console.log(chalk.green("\n✓ Simulation complete!"));
-    console.log(chalk.gray("  In production, this response would be submitted to the Seedstr platform."));
+    console.log(chalk.gray("  Same pipeline as production; response would be submitted to Seedstr."));
+    console.log(chalk.gray(`  Total response time: ${elapsed}s`));
 
     if (budget > 0 && usage) {
       const profitMargin = budget - usage.estimatedCost;
       console.log(
         chalk.gray("  Profit margin: ") +
-        (profitMargin > 0
-          ? chalk.green(`+$${profitMargin.toFixed(4)}`)
-          : chalk.red(`-$${Math.abs(profitMargin).toFixed(4)}`)) +
-        chalk.gray(` (job pays $${budget.toFixed(2)}, LLM cost ~$${usage.estimatedCost.toFixed(4)})`)
+          (profitMargin > 0
+            ? chalk.green(`+$${profitMargin.toFixed(4)}`)
+            : chalk.red(`-$${Math.abs(profitMargin).toFixed(4)}`)) +
+          chalk.gray(` (job pays $${budget.toFixed(2)}, LLM cost ~$${usage.estimatedCost.toFixed(4)})`)
       );
     }
 
-    // Cleanup project files if they were built
-    if (result.projectBuild && result.projectBuild.success) {
+    // Cleanup project files if built
+    if (result.mode === "code" && result.projectDir && result.zipPath) {
       const { confirm } = await prompts({
         type: "confirm",
         name: "confirm",
@@ -214,7 +283,7 @@ Job Budget: $${effectiveBudget.toFixed(2)} USD${fakeJob.jobType === "SWARM" ? ` 
         initial: false,
       });
       if (confirm) {
-        cleanupProject(result.projectBuild.projectDir, result.projectBuild.zipPath);
+        cleanupProject(result.projectDir, result.zipPath);
         console.log(chalk.gray("  Build files cleaned up."));
       }
     }

@@ -42,7 +42,7 @@ function addUsage(a: StepUsage, b: StepUsage | undefined): StepUsage {
  * @returns PipelineResult — includes zipPath (code tasks) or textResponse (text tasks).
  */
 export async function runPipeline(options: PipelineOptions): Promise<PipelineResult> {
-  const { jobPrompt, budget = 0 } = options;
+  const { jobPrompt, budget = 0, onStepComplete } = options;
   const timings: StepTiming[] = [];
   let totalUsage: StepUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
@@ -55,6 +55,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
   timings.push({ step: "planner", durationMs: plannerMs });
   totalUsage = addUsage(totalUsage, plannerResult.usage);
+  onStepComplete?.("planner", { durationMs: plannerMs });
 
   const { plan } = plannerResult;
 
@@ -70,6 +71,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
     timings.push({ step: "builder", durationMs: builderMs });
     totalUsage = addUsage(totalUsage, buildResult.usage);
+    onStepComplete?.("builder", { durationMs: builderMs });
 
     logger.info(`Pipeline: text response generated in ${builderMs}ms`);
     logTimingSummary(timings);
@@ -89,6 +91,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
   timings.push({ step: "builder", durationMs: builderMs });
   totalUsage = addUsage(totalUsage, buildResult.usage);
+  onStepComplete?.("builder", { durationMs: builderMs, fileCount: buildResult.files.length });
 
   logger.info(
     `Pipeline: builder done in ${builderMs}ms — ${buildResult.files.length} file(s) generated`
@@ -114,6 +117,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
   timings.push({ step: "verifier", durationMs: verifierMs });
   totalUsage = addUsage(totalUsage, verifyResult.usage);
+  onStepComplete?.("verifier", {
+    durationMs: verifierMs,
+    issuesCount: verifyResult.issuesFound.length,
+  });
 
   logger.info(
     `Pipeline: verifier done in ${verifierMs}ms — ` +
@@ -136,6 +143,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   );
 
   timings.push({ step: "zip", durationMs: zipMs });
+  onStepComplete?.("zip", { durationMs: zipMs, fileCount: buildOutput.files?.length ?? 0 });
 
   if (!buildOutput.success) {
     logger.error(`Pipeline: zip failed — ${buildOutput.error}`);

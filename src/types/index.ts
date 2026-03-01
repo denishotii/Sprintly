@@ -276,6 +276,9 @@ export type AgentEvent =
   | { type: "tool_call"; tool: string; args: unknown }
   | { type: "tool_result"; tool: string; result: ToolResult }
   | { type: "response_generated"; job: Job; preview: string; usage?: TokenUsage }
+  | { type: "plan_complete"; job: Job; durationMs: number }
+  | { type: "build_complete"; job: Job; durationMs: number; fileCount?: number }
+  | { type: "verify_complete"; job: Job; durationMs: number; issuesCount?: number }
   | { type: "project_built"; job: Job; files: string[]; zipPath: string }
   | { type: "files_uploading"; job: Job; fileCount: number }
   | { type: "files_uploaded"; job: Job; files: FileAttachment[] }
