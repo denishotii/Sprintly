@@ -48,6 +48,8 @@ export interface LLMResponse {
     completionTokens: number;
     totalTokens: number;
   };
+  /** Why generation stopped; 'length' = output truncated (increase maxTokens). */
+  finishReason?: string;
   // If a project was built during this response
   projectBuild?: ProjectBuildResult;
 }
@@ -440,7 +442,11 @@ export class LLMClient {
     const provider = this.getProviderForModel(model);
     const toolsFilter = options.toolsFilter ?? (step === "builder" ? "builder" : "all");
     const tools = options.tools !== false ? this.getTools(toolsFilter) : undefined;
-    const toolChoice = options.toolChoice ?? (step === "builder" && tools ? "required" : undefined);
+    const toolChoice =
+      options.toolChoice ??
+      (step === "builder" && tools?.create_project
+        ? { type: "tool" as const, toolName: "create_project" }
+        : undefined);
     return this.executeGenerationWithProvider(provider, model, {
       prompt: options.prompt,
       systemPrompt: options.systemPrompt,
@@ -555,7 +561,7 @@ export class LLMClient {
       maxTokens: number;
       temperature: number;
       tools?: Record<string, Tool>;
-      toolChoice?: "auto" | "required" | "none";
+      toolChoice?: "auto" | "required" | "none" | { type: "tool"; toolName: string };
     }
   ): Promise<LLMResponse> {
     const { prompt, systemPrompt, maxTokens, temperature, tools, toolChoice } = params;
@@ -626,6 +632,7 @@ export class LLMClient {
       text: result.text,
       toolCalls: (toolCalls?.length ?? 0) > 0 ? toolCalls : undefined,
       usage: result.usage,
+      finishReason: result.finishReason,
       projectBuild,
     };
   }

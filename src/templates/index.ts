@@ -1,5 +1,6 @@
 /**
  * Template loader — exports design system CSS as strings for injection into generated projects.
+ * Also exports T10 component examples for the Builder system prompt.
  *
  * Usage in the pipeline:
  *   import { getBaseCSS, getComponentsCSS, getFullDesignSystem } from '../templates/index.js';
@@ -11,6 +12,8 @@
  *   builder.addFile('styles/base.css', getBaseCSS());
  *   builder.addFile('styles/components.css', getComponentsCSS());
  */
+
+export { BUILDER_COMPONENT_EXAMPLES } from "./prompt-examples.js";
 
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";

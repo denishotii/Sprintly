@@ -136,7 +136,13 @@ export async function runBuilder(
   }
 
   if (files.length === 0) {
-    logger.warn("Builder: no files extracted — project will be empty. Ensure the model calls create_project with a non-empty files array.");
+    const reason = result.finishReason ? ` (finishReason: ${result.finishReason})` : "";
+    logger.warn(
+      `Builder: no files extracted — project will be empty. Ensure the model calls create_project with a non-empty files array.${reason}`
+    );
+    if (result.finishReason === "length") {
+      logger.warn("Builder: response was truncated; the model hit max output tokens. Output may need more headroom.");
+    }
   }
 
   // Ensure README.md exists

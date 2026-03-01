@@ -22,6 +22,8 @@ export interface ProviderGenerateResult {
   text: string;
   toolCalls?: ProviderToolCall[];
   usage?: ProviderUsage;
+  /** Why the generation stopped; 'length' means output was truncated (increase maxTokens). */
+  finishReason?: string;
 }
 
 /** Parameters for a single generation request */

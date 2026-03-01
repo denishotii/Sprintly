@@ -1,4 +1,5 @@
 import { TECH_STACK_RULES, DESIGN_DEFAULTS, OUTPUT_STRUCTURE, HTML_QUALITY_RULES, CDN_URLS } from "./shared.js";
+import { BUILDER_COMPONENT_EXAMPLES } from "../templates/index.js";
 
 /**
  * System prompt for the Builder step.
@@ -93,52 +94,10 @@ Apply to body: font-family: 'Inter', system-ui, -apple-system, sans-serif;
 - Button press: active:scale-95
 - Card hover: hover:-translate-y-1 hover:shadow-lg
 
-## Examples of Excellent Code
+## Component Examples (Reference These for Layout and Quality)
+Use these patterns for consistent, accessible, responsive UIs. Adapt to the project theme; swap blue-600 for your accent (e.g. orange-500, green-600). Ensure Alpine.js is loaded if you use x-data.
 
-### Example: Responsive nav with mobile menu (Alpine.js)
-<nav x-data="{ open: false }" class="sticky top-0 z-50 bg-white/90 backdrop-blur border-b border-slate-200">
-  <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-    <a href="#" class="font-bold text-xl text-slate-900">Brand</a>
-    <div class="hidden md:flex items-center gap-6">
-      <a href="#features" class="text-slate-600 hover:text-slate-900 transition-colors">Features</a>
-      <a href="#pricing" class="text-slate-600 hover:text-slate-900 transition-colors">Pricing</a>
-      <a href="#contact" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">Get Started</a>
-    </div>
-    <button @click="open = !open" class="md:hidden p-2 rounded-lg hover:bg-slate-100">
-      <svg x-show="!open" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
-      </svg>
-      <svg x-show="open" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-      </svg>
-    </button>
-  </div>
-  <div x-show="open" x-transition class="md:hidden px-4 pb-4 flex flex-col gap-3">
-    <a href="#features" class="text-slate-700 py-2">Features</a>
-    <a href="#pricing" class="text-slate-700 py-2">Pricing</a>
-    <a href="#contact" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-center">Get Started</a>
-  </div>
-</nav>
-
-### Example: Card grid
-<section class="py-20 px-4">
-  <div class="max-w-6xl mx-auto">
-    <h2 class="text-3xl font-bold text-center text-slate-900 mb-4">Features</h2>
-    <p class="text-slate-600 text-center mb-12 max-w-2xl mx-auto">Subtitle text here</p>
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      <!-- Card -->
-      <div class="bg-white border border-slate-200 rounded-xl p-6 hover:-translate-y-1 hover:shadow-lg transition-all duration-200">
-        <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
-          <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
-          </svg>
-        </div>
-        <h3 class="font-semibold text-slate-900 mb-2">Feature Name</h3>
-        <p class="text-slate-600 text-sm leading-relaxed">Feature description that explains the value clearly.</p>
-      </div>
-    </div>
-  </div>
-</section>
+${BUILDER_COMPONENT_EXAMPLES}
 
 ## Final Checklist Before Submitting
 Before calling create_project, verify mentally:

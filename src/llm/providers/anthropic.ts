@@ -40,9 +40,18 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): LLMPro
 
       const effectiveModel = modelOverride ?? modelId;
       const hasTools = tools && Object.keys(tools).length > 0;
-      const resolvedToolChoice = toolChoice === "required" ? "required" : toolChoice === "none" ? "none" : undefined;
+      const resolvedToolChoice =
+        toolChoice === "required"
+          ? "required"
+          : toolChoice === "none"
+            ? "none"
+            : toolChoice && typeof toolChoice === "object" && toolChoice.type === "tool"
+              ? { type: "tool" as const, toolName: toolChoice.toolName }
+              : undefined;
 
-      logger.debug(`Anthropic generate: model=${effectiveModel}, hasTools=${hasTools}, toolChoice=${resolvedToolChoice ?? "auto"}`);
+      logger.debug(
+        `Anthropic generate: model=${effectiveModel}, hasTools=${hasTools}, toolChoice=${resolvedToolChoice ? (typeof resolvedToolChoice === "string" ? resolvedToolChoice : resolvedToolChoice.toolName) : "auto"}`
+      );
 
       const result = await generateText({
         model: anthropic(effectiveModel) as unknown as LanguageModel,

@@ -146,9 +146,16 @@ export function normalizeGenerateResult(result: GenerateTextResult): ProviderGen
       }
     : undefined;
 
+  const finishReason =
+    result.finishReason ??
+    (result.steps?.length
+      ? (result.steps[result.steps.length - 1] as { finishReason?: string } | undefined)?.finishReason
+      : undefined);
+
   return {
     text: text ?? "",
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     usage,
+    finishReason,
   };
 }
