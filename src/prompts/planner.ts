@@ -31,8 +31,6 @@ You MUST respond with ONLY a valid JSON object — no markdown fences, no explan
   },
   "files": [
     { "path": "index.html", "description": "Main entry point and layout" },
-    { "path": "styles/main.css", "description": "Custom CSS variables and overrides" },
-    { "path": "scripts/app.js", "description": "Application logic" },
     { "path": "README.md", "description": "Project overview and usage" }
   ],
   "designNotes": "Brief notes on visual style, color scheme, or UX requirements",
@@ -40,10 +38,11 @@ You MUST respond with ONLY a valid JSON object — no markdown fences, no explan
 }
 
 ## Rules
-- files[] must ALWAYS include index.html, styles/main.css, and README.md at minimum
-- Include scripts/app.js only if the project needs JavaScript
-- Add additional files if needed (e.g., data/items.json, components/card.html)
-- Keep file list minimal — prefer fewer, well-organized files over many small ones
+- files[] must ALWAYS include index.html and README.md
+- Do NOT include styles/main.css — Tailwind CDN handles all styling; put any brand tokens in a <style> block inside index.html
+- Include scripts/app.js ONLY for high-complexity tasks with significant JavaScript logic (quiz engines, data apps, multi-step forms)
+- For low/medium complexity, keep it to 2 files: index.html + README.md
+- Add data/items.json or similar only when the project clearly needs structured data
 - For text tasks, files[] can be empty []
 
 ${OUTPUT_STRUCTURE}
@@ -56,11 +55,9 @@ Example 1 — "Build a landing page for a coffee shop called Bean Dreams"
 {
   "mode": "code",
   "taskSummary": "Marketing landing page for Bean Dreams coffee shop with hero, menu, and contact sections",
-  "techStack": { "styling": "tailwind", "interactivity": "vanilla-js", "dataStorage": "none", "charts": false, "icons": true },
+  "techStack": { "styling": "tailwind", "interactivity": "alpine", "dataStorage": "none", "charts": false, "icons": true },
   "files": [
-    { "path": "index.html", "description": "Full landing page with hero, menu, about, and contact sections" },
-    { "path": "styles/main.css", "description": "CSS custom properties for brand colors and font overrides" },
-    { "path": "scripts/app.js", "description": "Mobile nav toggle and smooth scroll behavior" },
+    { "path": "index.html", "description": "Full landing page with hero, menu, about, and contact sections. Mobile nav via Alpine.js. Brand colors in <style> block." },
     { "path": "README.md", "description": "Overview and how to open the site" }
   ],
   "designNotes": "Warm earthy tones (brown, cream, terracotta). Elegant serif headings with sans-serif body. Full-bleed hero image using CSS gradients.",
@@ -73,14 +70,12 @@ Example 2 — "Create a quiz app with 10 questions about world capitals"
   "taskSummary": "Interactive quiz app testing knowledge of world capitals with scoring and feedback",
   "techStack": { "styling": "tailwind", "interactivity": "alpine", "dataStorage": "none", "charts": false, "icons": false },
   "files": [
-    { "path": "index.html", "description": "Quiz UI with question display, answer options, score tracker, and results screen" },
-    { "path": "styles/main.css", "description": "Custom CSS animations and color feedback for correct/wrong answers" },
-    { "path": "data/questions.json", "description": "Array of 10 question objects with question, options, and correct answer" },
-    { "path": "scripts/app.js", "description": "Quiz logic: load questions, track score, advance through rounds, show results" },
+    { "path": "index.html", "description": "Quiz UI: question card, answer options, progress bar, score tracker, results screen. All state via Alpine.js x-data. Questions array embedded in script tag." },
+    { "path": "scripts/app.js", "description": "Quiz logic: question data, score tracking, answer validation, round progression" },
     { "path": "README.md", "description": "Overview and instructions" }
   ],
   "designNotes": "Clean card-based layout. Green highlight for correct, red for wrong. Progress bar showing question number.",
-  "complexityEstimate": "medium"
+  "complexityEstimate": "high"
 }
 
 Example 3 — "Write me a haiku about autumn"

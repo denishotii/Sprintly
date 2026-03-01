@@ -64,6 +64,9 @@ export function getConfig(): AgentConfig {
     const fromEnv = (key: string) => process.env[key]?.trim() || defaultModel;
     const plannerModel = normalizeAnthropicModelId(fromEnv("PLANNER_MODEL"));
     const builderModel = normalizeAnthropicModelId(fromEnv("BUILDER_MODEL"));
+    const builderFastModel = normalizeAnthropicModelId(
+      process.env.BUILDER_FAST_MODEL?.trim() || "claude-haiku-4-5-20251001"
+    );
     const verifierModel = normalizeAnthropicModelId(fromEnv("VERIFIER_MODEL"));
     // Text-only tasks: use TEXT_RESPONSE_MODEL from .env; if unset, use primary provider's default (no hardcoded model)
     const textResponseModel = normalizeAnthropicModelId(
@@ -88,12 +91,16 @@ export function getConfig(): AgentConfig {
     anthropicModel,
     plannerModel,
     builderModel,
+    builderFastModel,
     verifierModel,
     textResponseModel,
 
     // Model settings (active provider's model)
     model,
     maxTokens: parseInt(process.env.MAX_TOKENS || "4096", 10),
+    builderMaxTokens: parseInt(process.env.BUILDER_MAX_TOKENS || "20000", 10),
+    builderLowMaxTokens: parseInt(process.env.BUILDER_LOW_MAX_TOKENS || "8000", 10),
+    builderMediumMaxTokens: parseInt(process.env.BUILDER_MEDIUM_MAX_TOKENS || "14000", 10),
     temperature: parseFloat(process.env.TEMPERATURE || "0.7"),
 
     // Agent behavior

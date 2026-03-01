@@ -182,6 +182,8 @@ export interface AgentConfig {
   // Pipeline per-step models (planner → builder → verifier). Model IDs: claude-* = Anthropic, gpt-* = OpenAI.
   plannerModel: string;
   builderModel: string;
+  /** Fast model for low/medium complexity builds (e.g. Haiku). Much faster than Sonnet/Opus. */
+  builderFastModel: string;
   verifierModel: string;
   /** Model for text-only tasks (e.g. threads, copy). From TEXT_RESPONSE_MODEL in .env, or primary provider default if unset. */
   textResponseModel: string;
@@ -189,6 +191,12 @@ export interface AgentConfig {
   // Model settings (used by active provider)
   model: string;
   maxTokens: number;
+  /** Max tokens for builder step (code gen). Lower = faster, higher = room for large projects. */
+  builderMaxTokens: number;
+  /** Max tokens for low-complexity builds (simple landing pages, etc.). */
+  builderLowMaxTokens: number;
+  /** Max tokens for medium-complexity builds (interactive sites, small apps). */
+  builderMediumMaxTokens: number;
   temperature: number;
 
   // Agent behavior

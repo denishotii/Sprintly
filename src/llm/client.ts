@@ -125,8 +125,8 @@ export interface GenerateOptions {
   toolsFilter?: "all" | "builder";
 }
 
-/** Pipeline step names; each can use its own model (see config plannerModel, builderModel, verifierModel, textResponseModel). */
-export type PipelineStep = "planner" | "builder" | "verifier" | "textResponse";
+/** Pipeline step names; each can use its own model (see config plannerModel, builderModel, builderFastModel, verifierModel, textResponseModel). */
+export type PipelineStep = "planner" | "builder" | "builderFast" | "verifier" | "textResponse";
 
 /**
  * LLM Client with direct OpenAI and Anthropic API support.
@@ -207,13 +207,15 @@ export class LLMClient {
     );
   }
 
-  /** Return the configured model ID for a pipeline step (planner, builder, verifier, textResponse). */
+  /** Return the configured model ID for a pipeline step (planner, builder, builderFast, verifier, textResponse). */
   getModelForStep(step: PipelineStep): string {
     switch (step) {
       case "planner":
         return this.config.plannerModel;
       case "builder":
         return this.config.builderModel;
+      case "builderFast":
+        return this.config.builderFastModel;
       case "verifier":
         return this.config.verifierModel;
       case "textResponse":
@@ -442,11 +444,12 @@ export class LLMClient {
 
     const model = this.getModelForStep(step);
     const provider = this.getProviderForModel(model);
-    const toolsFilter = options.toolsFilter ?? (step === "builder" || step === "textResponse" ? "builder" : "all");
+    const isBuilderStep = step === "builder" || step === "builderFast";
+    const toolsFilter = options.toolsFilter ?? (isBuilderStep || step === "textResponse" ? "builder" : "all");
     const tools = options.tools !== false ? this.getTools(toolsFilter) : undefined;
     const toolChoice =
       options.toolChoice ??
-      (step === "builder" && tools?.create_project
+      (isBuilderStep && tools?.create_project
         ? { type: "tool" as const, toolName: "create_project" }
         : undefined);
     return this.executeGenerationWithProvider(provider, model, {

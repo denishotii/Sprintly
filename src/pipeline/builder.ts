@@ -3,8 +3,10 @@
  * Uses the BUILDER_MODEL (default: Claude Sonnet — best design implementation in practice).
  */
 
+import { getConfig } from "../config/index.js";
 import { getLLMClient } from "../llm/client.js";
 import { BUILDER_SYSTEM_PROMPT, TEXT_RESPONSE_SYSTEM_PROMPT, assembleBuilderUserMessage } from "../prompts/index.js";
+import { getFullDesignSystem } from "../templates/index.js";
 import { logger } from "../utils/logger.js";
 import type { PlanResult, BuildResult, StepUsage } from "./types.js";
 import type { ProjectFile } from "../tools/projectBuilder.js";
@@ -107,15 +109,23 @@ export async function runBuilder(
   }
 
   // Code mode: generate files
+  const config = getConfig();
   const userMessage = assembleBuilderUserMessage({ jobPrompt, plan });
 
-  logger.debug(`Builder: generating ${plan.files.length} files for "${plan.taskSummary}"`);
+  const complexity = plan.complexityEstimate ?? "medium";
+  const step = "builder"; // Always use Sonnet for best quality
+  const maxTokens =
+    complexity === "low"    ? config.builderLowMaxTokens :
+    complexity === "medium" ? config.builderMediumMaxTokens :
+    config.builderMaxTokens;
 
-  const result = await llm.generateForStep("builder", {
+  logger.debug(`Builder: complexity=${complexity} → step=${step}, maxTokens=${maxTokens}, files=${plan.files.length}`);
+
+  const result = await llm.generateForStep(step, {
     prompt: userMessage,
     systemPrompt: BUILDER_SYSTEM_PROMPT,
     tools: true, // create_project, create_file, finalize_project are available
-    maxTokens: 128000, // API max output (e.g. Opus 128K). Full create_project with many files needs headroom; 1M is context-window (input), not output limit.
+    maxTokens,
     temperature: 0.4, // Low-ish for consistent code, slight room for creativity
   });
 
@@ -143,6 +153,21 @@ export async function runBuilder(
     );
     if (result.finishReason === "length") {
       logger.warn("Builder: response was truncated; the model hit max output tokens. Output may need more headroom.");
+    }
+  }
+
+  // Always inject the full design system CSS (provides .btn, .card, .nav, .hero, etc.)
+  // This is pre-built — the builder should NOT be writing CSS from scratch.
+  if (files.length > 0) {
+    const cssIndex = files.findIndex((f) => f.path === "styles/main.css");
+    if (cssIndex === -1) {
+      // Builder didn't write CSS — inject design system as the sole stylesheet
+      files.push({ path: "styles/main.css", content: getFullDesignSystem() });
+      logger.debug("Builder: auto-injected design system CSS (styles/main.css)");
+    } else {
+      // Builder wrote custom CSS — prepend design system so builder's rules win
+      files[cssIndex].content = getFullDesignSystem(files[cssIndex].content);
+      logger.debug("Builder: prepended design system to existing styles/main.css");
     }
   }
 

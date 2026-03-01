@@ -14,29 +14,29 @@ export const TECH_STACK_RULES = `
 export const DESIGN_DEFAULTS = `
 ## Design Defaults
 - Mobile-first responsive layout (works on 320px up to 1440px+)
-- CSS custom properties for colors, spacing, and typography
-- Dark/light mode via prefers-color-scheme where appropriate
-- Spacing scale: multiples of 4px (4, 8, 12, 16, 24, 32, 48, 64)
-- Default border-radius: 8px
-- Smooth transitions: 150ms ease
-- Font: Inter from Google Fonts (fallback: system-ui, sans-serif)
-- Color palette: use Tailwind's slate/zinc neutrals + one accent color
+- Font: Inter from Google Fonts — add <link rel="preconnect" href="https://fonts.googleapis.com"> and load Inter in <head>; apply with class="font-sans" on <body>
+- Color palette: Tailwind slate/zinc neutrals + ONE project accent color (see Visual Design Standards)
+- Smooth transitions: transition-all duration-200 on interactive elements
+- Rounded corners: rounded-xl for cards, rounded-full for buttons and badges, rounded-2xl for large containers
+- Max content width: max-w-6xl mx-auto (sections), max-w-4xl mx-auto (text-heavy areas)
+- Use shadow-sm on cards at rest, shadow-lg on hover — never flat/no-shadow cards
 `.trim();
 
 export const OUTPUT_STRUCTURE = `
 ## Required Output Structure
-Every project zip must contain:
+Every project must contain:
   index.html       ← entry point (always required)
-  styles/
-    main.css       ← styles (always required, even if minimal)
-  scripts/
-    app.js         ← application logic (required if JS needed)
   README.md        ← always required
 
-Optional additions:
-  assets/          ← images, icons, fonts
-  components/      ← HTML partials or JS modules
+Auto-provided (do NOT generate these — they are injected automatically):
+  styles/main.css  ← complete design system CSS (.btn, .card, .nav, .hero, etc.) — auto-injected
+
+Optional additions (only include if the plan calls for them):
+  scripts/app.js   ← JS logic (only for apps with significant interactive behavior)
   data/            ← JSON data files
+  assets/          ← images, icons, fonts
+
+NEVER write styles/main.css — it is auto-provided. Put only project-specific accent color overrides in a <style> block inside index.html.
 `.trim();
 
 export const HTML_QUALITY_RULES = `

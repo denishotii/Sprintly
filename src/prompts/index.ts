@@ -91,7 +91,7 @@ export function assembleBuilderUserMessage(ctx: BuilderContext): string {
     `## Files to Create`,
     fileList,
     ``,
-    `Build every file listed above with complete, production-quality content.`,
+    `Build every file listed above with complete, production-quality content. Keep each file concise (minimal comments, lean markup).`,
     ``,
     `IMPORTANT: You must call the create_project tool once with projectName and files (array of { path, content }) containing every file above. Do not output code in your message — only the tool call delivers the project.`,
   ].join("\n");
