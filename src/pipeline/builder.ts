@@ -1,6 +1,6 @@
 /**
  * Builder step — generates all project files from the Planner's output.
- * Uses the BUILDER_MODEL (highest quality model for code generation).
+ * Uses the BUILDER_MODEL (default: Claude Sonnet — best design implementation in practice).
  */
 
 import { getLLMClient } from "../llm/client.js";

@@ -59,11 +59,12 @@ export function getConfig(): AgentConfig {
     const model =
       primaryProvider === "openai" ? openaiModel : anthropicModel;
 
-    // Pipeline per-step models (fallback to default model when not set)
+    // Pipeline per-step models: use .env when set and non-empty; otherwise fall back to provider default
     const defaultModel = primaryProvider === "openai" ? openaiModel : anthropicModel;
-    const plannerModel = normalizeAnthropicModelId(process.env.PLANNER_MODEL ?? defaultModel);
-    const builderModel = normalizeAnthropicModelId(process.env.BUILDER_MODEL ?? defaultModel);
-    const verifierModel = normalizeAnthropicModelId(process.env.VERIFIER_MODEL ?? defaultModel);
+    const fromEnv = (key: string) => process.env[key]?.trim() || defaultModel;
+    const plannerModel = normalizeAnthropicModelId(fromEnv("PLANNER_MODEL"));
+    const builderModel = normalizeAnthropicModelId(fromEnv("BUILDER_MODEL"));
+    const verifierModel = normalizeAnthropicModelId(fromEnv("VERIFIER_MODEL"));
 
   return {
     // API Keys

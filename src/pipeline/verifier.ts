@@ -3,7 +3,7 @@
  *
  * Two phases:
  *  1. Programmatic validation (fast, no LLM): checks structure, references, etc.
- *  2. LLM review (VERIFIER_MODEL): fixes any issues found in phase 1.
+ *  2. LLM review (VERIFIER_MODEL, default Claude Sonnet): fixes any issues found in phase 1.
  *     Skipped entirely if phase 1 finds no issues (speed optimisation).
  */
 
