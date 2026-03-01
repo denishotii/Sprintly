@@ -1,6 +1,6 @@
 /**
  * Planner step — classifies the job and produces a structured JSON execution plan.
- * Uses the PLANNER_MODEL (fast, lightweight model).
+ * Uses the PLANNER_MODEL (default: Claude Opus for best planning and design concept).
  */
 
 import { getLLMClient } from "../llm/client.js";
