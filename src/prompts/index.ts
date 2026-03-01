@@ -1,6 +1,7 @@
 export { PLANNER_SYSTEM_PROMPT } from "./planner.js";
 export { BUILDER_SYSTEM_PROMPT } from "./builder.js";
 export { VERIFIER_SYSTEM_PROMPT } from "./verifier.js";
+export { TEXT_RESPONSE_SYSTEM_PROMPT } from "./textResponse.js";
 export {
   TECH_STACK_RULES,
   DESIGN_DEFAULTS,

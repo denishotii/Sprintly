@@ -15,10 +15,12 @@ const MODEL_COSTS: Record<string, { input: number; output: number }> = {
   "anthropic/claude-sonnet-4": { input: 3.0, output: 15.0 },
   "anthropic/claude-opus-4": { input: 15.0, output: 75.0 },
   "anthropic/claude-3.5-sonnet": { input: 3.0, output: 15.0 },
+  "anthropic/claude-3.5-haiku": { input: 0.8, output: 4.0 },
   "anthropic/claude-3-opus": { input: 15.0, output: 75.0 },
   "openai/gpt-4-turbo": { input: 10.0, output: 30.0 },
   "openai/gpt-4o": { input: 5.0, output: 15.0 },
   "openai/gpt-4o-mini": { input: 0.15, output: 0.6 },
+  "claude-3-5-haiku-20241022": { input: 0.8, output: 4.0 },
   "meta-llama/llama-3.1-405b-instruct": { input: 3.0, output: 3.0 },
   "meta-llama/llama-3.1-70b-instruct": { input: 0.5, output: 0.5 },
   "google/gemini-pro-1.5": { input: 2.5, output: 7.5 },
@@ -182,8 +184,11 @@ export async function simulateCommand(options: SimulateOptions): Promise<void> {
     const elapsed = (elapsedMs / 1000).toFixed(1);
     spinner.succeed(`Pipeline complete in ${elapsed}s`);
 
-    // Token usage (same as runner: use builder model for cost)
-    const modelForCost = config.builderModel || config.model;
+    // Token usage: use textResponseModel for text tasks, builderModel for code tasks
+    const modelForCost =
+      result.mode === "text"
+        ? config.textResponseModel || config.model
+        : config.builderModel || config.model;
     let usage: TokenUsage | undefined;
     if (
       result.totalUsage &&

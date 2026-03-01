@@ -65,6 +65,10 @@ export function getConfig(): AgentConfig {
     const plannerModel = normalizeAnthropicModelId(fromEnv("PLANNER_MODEL"));
     const builderModel = normalizeAnthropicModelId(fromEnv("BUILDER_MODEL"));
     const verifierModel = normalizeAnthropicModelId(fromEnv("VERIFIER_MODEL"));
+    // Text-only tasks: use TEXT_RESPONSE_MODEL from .env; if unset, use primary provider's default (no hardcoded model)
+    const textResponseModel = normalizeAnthropicModelId(
+      process.env.TEXT_RESPONSE_MODEL?.trim() || defaultModel
+    );
 
   return {
     // API Keys
@@ -85,6 +89,7 @@ export function getConfig(): AgentConfig {
     plannerModel,
     builderModel,
     verifierModel,
+    textResponseModel,
 
     // Model settings (active provider's model)
     model,

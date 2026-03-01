@@ -4,7 +4,7 @@
  */
 
 import { getLLMClient } from "../llm/client.js";
-import { BUILDER_SYSTEM_PROMPT, assembleBuilderUserMessage } from "../prompts/index.js";
+import { BUILDER_SYSTEM_PROMPT, TEXT_RESPONSE_SYSTEM_PROMPT, assembleBuilderUserMessage } from "../prompts/index.js";
 import { logger } from "../utils/logger.js";
 import type { PlanResult, BuildResult, StepUsage } from "./types.js";
 import type { ProjectFile } from "../tools/projectBuilder.js";
@@ -82,14 +82,15 @@ export async function runBuilder(
 ): Promise<BuildResult> {
   const llm = getLLMClient();
 
-  // Text-mode tasks: just return the raw LLM response
+  // Text-mode tasks: use the dedicated text-response model (faster, cheaper)
   if (plan.mode === "text") {
     logger.debug("Builder: text mode — generating direct response");
-    const result = await llm.generateForStep("builder", {
+    const result = await llm.generateForStep("textResponse", {
       prompt: jobPrompt,
-      systemPrompt: "You are a helpful AI assistant. Respond clearly and thoroughly to the user's request.",
+      systemPrompt: TEXT_RESPONSE_SYSTEM_PROMPT,
       tools: false,
       temperature: 0.7,
+      maxTokens: 1200, // Tighter cap for ~5–6 tweet threads; keeps latency down with gpt-4o
     });
 
     return {

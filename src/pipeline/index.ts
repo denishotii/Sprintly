@@ -15,9 +15,43 @@ import { runVerifier } from "./verifier.js";
 import type {
   PipelineOptions,
   PipelineResult,
+  PlanResult,
   StepTiming,
   StepUsage,
 } from "./types.js";
+
+/** Minimal plan for text-only tasks when we skip the planner (fast path). */
+const SYNTHETIC_TEXT_PLAN: PlanResult = {
+  mode: "text",
+  taskSummary: "",
+  techStack: {
+    styling: "vanilla-css",
+    interactivity: "none",
+    dataStorage: "none",
+    charts: false,
+    icons: false,
+  },
+  files: [],
+  designNotes: "",
+  complexityEstimate: "low",
+};
+
+/**
+ * Heuristic: prompt looks like a text-only request (copy, thread, blog, etc.) and not a code/build task.
+ * When true, we skip the planner and go straight to the text model to save ~2–3s.
+ */
+function isLikelyTextOnlyPrompt(prompt: string): boolean {
+  const p = prompt.trim().toLowerCase();
+  const codeLike =
+    /\b(build|create|make|landing\s*page|website|web\s*page|app\s*(for|that)|portfolio\s*site|dashboard|\.html|react|vue|script|program|code\s+(a|the)|implement)\b/i.test(
+      p
+    );
+  const textLike =
+    /\b(write|thread|tweet|blog|post|email|copy|content|summary|explain|describe|haiku|essay|article|viral)\b/i.test(
+      p
+    );
+  return textLike && !codeLike;
+}
 
 /** Utility: run a function and return [result, durationMs]. */
 async function timed<T>(fn: () => Promise<T>): Promise<[T, number]> {
@@ -48,20 +82,29 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
   logger.info(`Pipeline: starting for prompt="${jobPrompt.substring(0, 80)}..."`);
 
-  // ─── Step 1: Planner ───────────────────────────────────────
-  logger.info("Pipeline: [1/3] Planner");
+  // ─── Optional: skip planner for obvious text-only prompts (saves ~2–3s) ───
+  let plan: PlanResult;
+  let plannerMs: number;
 
-  const [plannerResult, plannerMs] = await timed(() => runPlanner(jobPrompt, budget));
-
-  timings.push({ step: "planner", durationMs: plannerMs });
-  totalUsage = addUsage(totalUsage, plannerResult.usage);
-  onStepComplete?.("planner", { durationMs: plannerMs });
-
-  const { plan } = plannerResult;
-
-  logger.info(
-    `Pipeline: planner done in ${plannerMs}ms — mode=${plan.mode}, files=${plan.files.length}, complexity=${plan.complexityEstimate}`
-  );
+  if (isLikelyTextOnlyPrompt(jobPrompt)) {
+    logger.info("Pipeline: text-like prompt — skipping planner (fast path)");
+    plan = { ...SYNTHETIC_TEXT_PLAN, taskSummary: jobPrompt.substring(0, 120) };
+    plannerMs = 0;
+    timings.push({ step: "planner", durationMs: 0 });
+    onStepComplete?.("planner", { durationMs: 0 });
+  } else {
+    // ─── Step 1: Planner ───────────────────────────────────────
+    logger.info("Pipeline: [1/3] Planner");
+    const [plannerResult, ms] = await timed(() => runPlanner(jobPrompt, budget));
+    plannerMs = ms;
+    plan = plannerResult.plan;
+    timings.push({ step: "planner", durationMs: plannerMs });
+    totalUsage = addUsage(totalUsage, plannerResult.usage);
+    onStepComplete?.("planner", { durationMs: plannerMs });
+    logger.info(
+      `Pipeline: planner done in ${plannerMs}ms — mode=${plan.mode}, files=${plan.files.length}, complexity=${plan.complexityEstimate}`
+    );
+  }
 
   // ─── Text-mode fast path ───────────────────────────────────
   if (plan.mode === "text") {

@@ -183,6 +183,8 @@ export interface AgentConfig {
   plannerModel: string;
   builderModel: string;
   verifierModel: string;
+  /** Model for text-only tasks (e.g. threads, copy). From TEXT_RESPONSE_MODEL in .env, or primary provider default if unset. */
+  textResponseModel: string;
 
   // Model settings (used by active provider)
   model: string;

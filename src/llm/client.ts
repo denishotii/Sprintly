@@ -125,8 +125,8 @@ export interface GenerateOptions {
   toolsFilter?: "all" | "builder";
 }
 
-/** Pipeline step names; each can use its own model (see config plannerModel, builderModel, verifierModel). */
-export type PipelineStep = "planner" | "builder" | "verifier";
+/** Pipeline step names; each can use its own model (see config plannerModel, builderModel, verifierModel, textResponseModel). */
+export type PipelineStep = "planner" | "builder" | "verifier" | "textResponse";
 
 /**
  * LLM Client with direct OpenAI and Anthropic API support.
@@ -207,7 +207,7 @@ export class LLMClient {
     );
   }
 
-  /** Return the configured model ID for a pipeline step (planner, builder, verifier). */
+  /** Return the configured model ID for a pipeline step (planner, builder, verifier, textResponse). */
   getModelForStep(step: PipelineStep): string {
     switch (step) {
       case "planner":
@@ -216,6 +216,8 @@ export class LLMClient {
         return this.config.builderModel;
       case "verifier":
         return this.config.verifierModel;
+      case "textResponse":
+        return this.config.textResponseModel;
     }
   }
 
@@ -440,7 +442,7 @@ export class LLMClient {
 
     const model = this.getModelForStep(step);
     const provider = this.getProviderForModel(model);
-    const toolsFilter = options.toolsFilter ?? (step === "builder" ? "builder" : "all");
+    const toolsFilter = options.toolsFilter ?? (step === "builder" || step === "textResponse" ? "builder" : "all");
     const tools = options.tools !== false ? this.getTools(toolsFilter) : undefined;
     const toolChoice =
       options.toolChoice ??
