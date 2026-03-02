@@ -28,6 +28,7 @@ const SYNTHETIC_TEXT_PLAN: PlanResult = {
     styling: "vanilla-css",
     interactivity: "none",
     dataStorage: "none",
+    runtime: "browser",
     charts: false,
     icons: false,
   },
@@ -209,7 +210,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const textResponse = buildSubmissionMessage(plan.taskSummary, buildOutput.files, verifyResult.issuesFound);
 
   return {
-    mode: "code",
+    mode: plan.mode,
     textResponse,
     zipPath: buildOutput.zipPath,
     files: verifyResult.files,

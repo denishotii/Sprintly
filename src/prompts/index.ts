@@ -1,5 +1,12 @@
 export { PLANNER_SYSTEM_PROMPT } from "./planner.js";
-export { BUILDER_SYSTEM_PROMPT } from "./builder.js";
+export {
+  BUILDER_SYSTEM_PROMPT,
+  WEBSITE_BUILDER_PROMPT,
+  REACT_BUILDER_PROMPT,
+  PYTHON_BUILDER_PROMPT,
+  NODE_BUILDER_PROMPT,
+  getBuilderPromptForMode,
+} from "./builder.js";
 export { VERIFIER_SYSTEM_PROMPT } from "./verifier.js";
 export { TEXT_RESPONSE_SYSTEM_PROMPT } from "./textResponse.js";
 export {
@@ -84,6 +91,7 @@ export function assembleBuilderUserMessage(ctx: BuilderContext): string {
     `Complexity: ${ctx.plan.complexityEstimate}`,
     ``,
     `Tech Stack:`,
+    `  Runtime: ${ctx.plan.techStack.runtime}`,
     `  Styling: ${ctx.plan.techStack.styling}`,
     `  Interactivity: ${ctx.plan.techStack.interactivity}`,
     `  Data Storage: ${ctx.plan.techStack.dataStorage}`,

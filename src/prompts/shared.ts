@@ -126,10 +126,11 @@ const NODE_TECH_STACK_RULES = [
 const REACT_OUTPUT_STRUCTURE = [
   "## Required Output Structure",
   "Every project zip must contain:",
-  "  index.html       ← entry point (loads React, ReactDOM, Babel, and your app script)",
-  "  scripts/app.jsx  ← React components (use type=\"text/babel\" when loading)",
+  "  index.html       ← entry point; ALL JSX must be inline in a <script type=\"text/babel\"> block",
   "  README.md        ← always required",
   "",
+  "Optional (readable source copy only — NOT loaded via src=):",
+  "  scripts/app.jsx  ← reference copy of JSX components; the running code is in index.html",
   "Optional: styles/main.css, assets/, data/",
 ].join("\n");
 

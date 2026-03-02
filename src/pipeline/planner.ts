@@ -19,12 +19,13 @@ export interface PlannerResult {
 function fallbackPlan(jobPrompt: string): PlanResult {
   logger.warn("Planner: using fallback plan due to parse failure");
   return {
-    mode: "code",
+    mode: "web-app",
     taskSummary: jobPrompt.substring(0, 120),
     techStack: {
       styling: "tailwind",
       interactivity: "vanilla-js",
       dataStorage: "none",
+      runtime: "browser",
       charts: false,
       icons: true,
     },
@@ -52,8 +53,10 @@ function parsePlanResponse(raw: string): PlanResult {
 
   const parsed = JSON.parse(cleaned) as Partial<PlanResult>;
 
+  const VALID_MODES = ["website", "web-app", "react-app", "python", "node", "text"];
+
   // Validate required fields
-  if (!parsed.mode || !["code", "text"].includes(parsed.mode)) {
+  if (!parsed.mode || !VALID_MODES.includes(parsed.mode)) {
     throw new Error(`Invalid mode: ${parsed.mode}`);
   }
 
@@ -62,19 +65,26 @@ function parsePlanResponse(raw: string): PlanResult {
     parsed.files = [];
   }
 
-  // Ensure techStack exists
+  // Ensure techStack exists with all required fields
   if (!parsed.techStack) {
     parsed.techStack = {
       styling: "tailwind",
       interactivity: "vanilla-js",
       dataStorage: "none",
+      runtime: "browser",
       charts: false,
       icons: false,
     };
+  } else if (!parsed.techStack.runtime) {
+    // Infer runtime from mode if missing (LLM may have omitted it)
+    parsed.techStack.runtime =
+      parsed.mode === "python" ? "python" :
+      parsed.mode === "node"   ? "node"   :
+                                 "browser";
   }
 
-  // Ensure required index.html and README.md for code tasks
-  if (parsed.mode === "code") {
+  // Ensure required files for web modes
+  if (parsed.mode === "website" || parsed.mode === "web-app") {
     const paths = parsed.files.map((f) => f.path);
     if (!paths.includes("index.html")) {
       parsed.files.unshift({ path: "index.html", description: "Main HTML entry point" });

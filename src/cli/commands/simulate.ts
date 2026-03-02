@@ -217,7 +217,7 @@ export async function simulateCommand(options: SimulateOptions): Promise<void> {
     }
 
     // Project build info (code mode)
-    if (result.mode === "code" && result.zipPath && result.projectDir && result.files) {
+    if (result.mode !== "text" && result.zipPath && result.projectDir && result.files) {
       const fileList = result.files.map((f) => f.path);
       const totalSize = result.files.reduce((sum, f) => sum + Buffer.byteLength(f.content, "utf-8"), 0);
       const savedPath = copyZipToBuilds(result.zipPath, prompt);
@@ -280,7 +280,7 @@ export async function simulateCommand(options: SimulateOptions): Promise<void> {
     }
 
     // Cleanup project files if built
-    if (result.mode === "code" && result.projectDir && result.zipPath) {
+    if (result.mode !== "text" && result.projectDir && result.zipPath) {
       const { confirm } = await prompts({
         type: "confirm",
         name: "confirm",
