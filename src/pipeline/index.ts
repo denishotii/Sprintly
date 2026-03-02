@@ -16,6 +16,7 @@ import type {
   PipelineOptions,
   PipelineResult,
   PlanResult,
+  ProjectMode,
   StepTiming,
   StepUsage,
 } from "./types.js";
@@ -38,19 +39,17 @@ const SYNTHETIC_TEXT_PLAN: PlanResult = {
 };
 
 /**
- * Heuristic: prompt looks like a text-only request (copy, thread, blog, etc.) and not a code/build task.
+ * Heuristic: prompt looks like a text-only request (copy, thread, blog, etc.) and NOT a code/build task.
  * When true, we skip the planner and go straight to the text model to save ~2–3s.
+ *
+ * Explicitly guards against Python, Node, React, and framework prompts being misclassified as text.
  */
 function isLikelyTextOnlyPrompt(prompt: string): boolean {
   const p = prompt.trim().toLowerCase();
   const codeLike =
-    /\b(build|create|make|landing\s*page|website|web\s*page|app\s*(for|that)|portfolio\s*site|dashboard|\.html|react|vue|script|program|code\s+(a|the)|implement)\b/i.test(
-      p
-    );
+    /\b(build|create|make|generate|implement|develop|landing\s*page|website|web\s*page|app\s*(for|that|with)|portfolio\s*site|dashboard|\.html|react|vue|angular|svelte|next\.?js|nuxt|flask|django|fastapi|express|node\.?js|python|typescript|javascript|script|program|cli\b|api\b|endpoint|scrape|scraping|csv|json\s+file|parse|convert)\b/i.test(p);
   const textLike =
-    /\b(write|thread|tweet|blog|post|email|copy|content|summary|explain|describe|haiku|essay|article|viral)\b/i.test(
-      p
-    );
+    /\b(write|thread|tweet|blog|post|email|copy|content|summary|summarize|explain|describe|haiku|essay|article|viral|poem|letter|caption|tagline|slogan)\b/i.test(p);
   return textLike && !codeLike;
 }
 
@@ -85,19 +84,16 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
   // ─── Optional: skip planner for obvious text-only prompts (saves ~2–3s) ───
   let plan: PlanResult;
-  let plannerMs: number;
 
   if (isLikelyTextOnlyPrompt(jobPrompt)) {
     logger.info("Pipeline: text-like prompt — skipping planner (fast path)");
     plan = { ...SYNTHETIC_TEXT_PLAN, taskSummary: jobPrompt.substring(0, 120) };
-    plannerMs = 0;
     timings.push({ step: "planner", durationMs: 0 });
     onStepComplete?.("planner", { durationMs: 0 });
   } else {
     // ─── Step 1: Planner ───────────────────────────────────────
     logger.info("Pipeline: [1/3] Planner");
-    const [plannerResult, ms] = await timed(() => runPlanner(jobPrompt, budget));
-    plannerMs = ms;
+    const [plannerResult, plannerMs] = await timed(() => runPlanner(jobPrompt, budget));
     plan = plannerResult.plan;
     timings.push({ step: "planner", durationMs: plannerMs });
     totalUsage = addUsage(totalUsage, plannerResult.usage);
@@ -120,16 +116,11 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     logger.info(`Pipeline: text response generated in ${builderMs}ms`);
     logTimingSummary(timings);
 
-    return {
-      mode: "text",
-      textResponse: buildResult.textResponse ?? "",
-      timings,
-      totalUsage,
-    };
+    return { mode: "text", textResponse: buildResult.textResponse ?? "", timings, totalUsage };
   }
 
   // ─── Step 2: Builder ───────────────────────────────────────
-  logger.info(`Pipeline: [2/3] Builder — creating ${plan.files.length} file(s)`);
+  logger.info(`Pipeline: [2/3] Builder (${plan.mode}) — creating ${plan.files.length} file(s)`);
 
   const [buildResult, builderMs] = await timed(() => runBuilder(jobPrompt, plan));
 
@@ -142,7 +133,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   );
 
   if (buildResult.files.length === 0) {
-    // Builder produced nothing — return text response as fallback
     logger.warn("Pipeline: builder produced no files, falling back to text response");
     return {
       mode: "text",
@@ -152,19 +142,16 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     };
   }
 
-  // ─── Step 3: Verifier ──────────────────────────────────────
-  logger.info("Pipeline: [3/3] Verifier");
+  // ─── Step 3: Verifier (mode-aware) ─────────────────────────
+  logger.info(`Pipeline: [3/3] Verifier (${plan.mode})`);
 
   const [verifyResult, verifierMs] = await timed(() =>
-    runVerifier(jobPrompt, buildResult.files)
+    runVerifier(jobPrompt, buildResult.files, plan.mode)
   );
 
   timings.push({ step: "verifier", durationMs: verifierMs });
   totalUsage = addUsage(totalUsage, verifyResult.usage);
-  onStepComplete?.("verifier", {
-    durationMs: verifierMs,
-    issuesCount: verifyResult.issuesFound.length,
-  });
+  onStepComplete?.("verifier", { durationMs: verifierMs, issuesCount: verifyResult.issuesFound.length });
 
   logger.info(
     `Pipeline: verifier done in ${verifierMs}ms — ` +
@@ -206,8 +193,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
   logTimingSummary(timings);
 
-  // Build a submission message
-  const textResponse = buildSubmissionMessage(plan.taskSummary, buildOutput.files, verifyResult.issuesFound);
+  const textResponse = buildSubmissionMessage(plan.mode, plan.taskSummary, buildOutput.files, verifyResult.issuesFound);
 
   return {
     mode: plan.mode,
@@ -235,23 +221,53 @@ function slugify(text: string): string {
     .replace(/-$/, "");
 }
 
+/**
+ * Build the human-readable submission message sent back to the Seedstr platform.
+ * Run instructions are mode-aware so the customer knows exactly how to use their project.
+ */
 function buildSubmissionMessage(
+  mode: ProjectMode,
   taskSummary: string,
   files: string[],
   issuesFixed: string[]
 ): string {
+  const fileLines = files.map((f) => `- \`${f}\``);
+
+  let runInstructions: string;
+  switch (mode) {
+    case "python":
+      runInstructions =
+        "**To get started:** Extract the zip.\n" +
+        "1. Install dependencies: `pip install -r requirements.txt`\n" +
+        "2. Run: `python main.py` (or `python app.py` if that's the entry point)";
+      break;
+    case "node":
+      runInstructions =
+        "**To get started:** Extract the zip.\n" +
+        "1. Install dependencies: `npm install`\n" +
+        "2. Run: `npm start`";
+      break;
+    default:
+      // website, web-app, react-app
+      runInstructions =
+        "**To get started:** Extract the zip and open `index.html` in any modern browser. No installation or build step required.";
+  }
+
   const lines: string[] = [
     `## ${taskSummary}`,
     "",
     "I've built your project and packaged it as a zip file. Here's what's included:",
     "",
-    ...files.map((f) => `- \`${f}\``),
+    ...fileLines,
     "",
-    "**To get started:** Extract the zip and open `index.html` in any modern browser. No installation or build step required.",
+    runInstructions,
   ];
 
   if (issuesFixed.length > 0) {
-    lines.push("", "**Quality checks:** The project was reviewed and the following issues were automatically corrected:");
+    lines.push(
+      "",
+      "**Quality checks:** The project was reviewed and the following issues were automatically corrected:"
+    );
     for (const issue of issuesFixed) {
       lines.push(`- ${issue}`);
     }
