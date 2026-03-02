@@ -481,7 +481,7 @@ export class AgentRunner extends EventEmitter implements TypedEventEmitter {
         usage,
       });
 
-      if (result.mode === "code" && result.zipPath && result.projectDir) {
+      if (result.mode !== "text" && result.zipPath && result.projectDir) {
         const fileList = result.files?.map((f) => f.path) ?? [];
         this.emitEvent({
           type: "project_built",

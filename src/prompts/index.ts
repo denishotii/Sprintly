@@ -8,6 +8,10 @@ export {
   OUTPUT_STRUCTURE,
   HTML_QUALITY_RULES,
   CDN_URLS,
+  PERFORMANCE_RULES,
+  REACT_CDN_URLS,
+  getTechStackRules,
+  getOutputStructure,
 } from "./shared.js";
 
 // Import the concrete PlanTechStack type so BuilderContext stays type-safe
