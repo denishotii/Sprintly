@@ -1,13 +1,23 @@
 /**
  * Builder step — generates all project files from the Planner's output.
- * Uses the BUILDER_MODEL (default: Claude Sonnet — best design implementation in practice).
+ *
+ * Routes by project mode: uses getBuilderPromptForMode(plan.mode) for the system prompt,
+ * injects design system CSS only for website/web-app, and generates mode-aware README when needed.
  */
 
 import { getLLMClient } from "../llm/client.js";
-import { BUILDER_SYSTEM_PROMPT, TEXT_RESPONSE_SYSTEM_PROMPT, assembleBuilderUserMessage } from "../prompts/index.js";
+import {
+  getBuilderPromptForMode,
+  TEXT_RESPONSE_SYSTEM_PROMPT,
+  assembleBuilderUserMessage,
+} from "../prompts/index.js";
+import { getFullDesignSystem } from "../templates/index.js";
 import { logger } from "../utils/logger.js";
-import type { PlanResult, BuildResult, StepUsage } from "./types.js";
+import type { PlanResult, BuildResult, StepUsage, ProjectMode } from "./types.js";
 import type { ProjectFile } from "../tools/projectBuilder.js";
+
+/** Modes that receive design system CSS injection (base + components). React handles its own styling. */
+const MODES_WITH_DESIGN_SYSTEM_CSS: ProjectMode[] = ["website", "web-app"];
 
 /**
  * Extract files from tool calls made by the Builder.
@@ -46,12 +56,24 @@ function extractFilesFromToolCalls(
 }
 
 /**
- * Auto-generate a README.md if the Builder didn't include one.
+ * Generate README content for auto-added README.md, based on project mode.
+ * Ensures run instructions match how the project is executed (browser vs pip/npm).
  */
-function generateReadme(taskSummary: string, files: ProjectFile[]): string {
-  const fileList = files
-    .map((f) => `- \`${f.path}\``)
-    .join("\n");
+function generateReadmeForMode(
+  mode: ProjectMode,
+  taskSummary: string,
+  files: ProjectFile[]
+): string {
+  const fileList = files.map((f) => `- \`${f.path}\``).join("\n");
+
+  const runSection =
+    mode === "website" || mode === "web-app" || mode === "react-app"
+      ? "## How to Run\nOpen `index.html` in any modern browser. No installation required."
+      : mode === "python"
+        ? "## How to Run\n**Prerequisites:** Python 3.10+\n\n**Install:** `pip install -r requirements.txt`\n\n**Run:** `python main.py` (or `python app.py` if your entry point is app.py)"
+        : mode === "node"
+          ? "## How to Run\n**Prerequisites:** Node.js 18+\n\n**Install:** `npm install`\n\n**Run:** `npm start`"
+          : "## How to Run\nSee project documentation.";
 
   return `# ${taskSummary}
 
@@ -61,12 +83,33 @@ ${taskSummary}
 ## Files
 ${fileList}
 
-## How to Run
-Open \`index.html\` in any modern browser. No installation required.
-
-## Tech
-Built with HTML, CSS, and JavaScript. All dependencies loaded via CDN.
+${runSection}
 `;
+}
+
+/**
+ * Inject design system CSS into styles/main.css for website and web-app modes.
+ * Mutates the files array in place: either prepends to existing styles/main.css or appends a new file.
+ */
+function injectDesignSystemCssIfNeeded(files: ProjectFile[], mode: ProjectMode): void {
+  if (!MODES_WITH_DESIGN_SYSTEM_CSS.includes(mode)) return;
+
+  const cssPath = "styles/main.css";
+  const normalized = (p: string) => p.replace(/\\/g, "/").toLowerCase();
+  const target = files.find((f) => normalized(f.path) === normalized(cssPath));
+
+  const designSystem = getFullDesignSystem();
+
+  if (target) {
+    target.content = `${designSystem}\n\n/* ── Project styles ───────────────────────────────────────── */\n${target.content}`;
+    logger.debug("Builder: prepended design system CSS to styles/main.css");
+  } else {
+    files.push({
+      path: cssPath,
+      content: `${designSystem}\n\n/* Project overrides */\n`,
+    });
+    logger.debug("Builder: added styles/main.css with design system (file was missing)");
+  }
 }
 
 /**
@@ -106,20 +149,21 @@ export async function runBuilder(
     };
   }
 
-  // Code mode: generate files
+  // Code mode: generate files — use mode-specific system prompt (website, web-app, react-app, python, node)
+  const systemPrompt = getBuilderPromptForMode(plan.mode);
   const userMessage = assembleBuilderUserMessage({ jobPrompt, plan });
 
-  logger.debug(`Builder: generating ${plan.files.length} files for "${plan.taskSummary}"`);
+  logger.debug(`Builder: mode=${plan.mode}, generating ${plan.files.length} files for "${plan.taskSummary}"`);
 
   const result = await llm.generateForStep("builder", {
     prompt: userMessage,
-    systemPrompt: BUILDER_SYSTEM_PROMPT,
+    systemPrompt,
     tools: true, // create_project, create_file, finalize_project are available
-    maxTokens: 128000, // API max output (e.g. Opus 128K). Full create_project with many files needs headroom; 1M is context-window (input), not output limit.
+    maxTokens: 128000, // API max output (e.g. Opus 128K). Full create_project with many files needs headroom.
     temperature: 0.4, // Low-ish for consistent code, slight room for creativity
   });
 
-  // Extract files from tool calls first
+  // Extract files from tool calls (mode-agnostic)
   let files: ProjectFile[] = [];
 
   if (result.toolCalls && result.toolCalls.length > 0) {
@@ -146,13 +190,16 @@ export async function runBuilder(
     }
   }
 
-  // Ensure README.md exists
-  const hasReadme = files.some((f) => f.path.toLowerCase() === "readme.md");
+  // Inject design system CSS only for website and web-app (not react-app; they handle their own styling)
+  injectDesignSystemCssIfNeeded(files, plan.mode);
+
+  // Ensure README.md exists — content depends on mode (browser vs pip/npm)
+  const hasReadme = files.some((f) => f.path.toLowerCase().replace(/\\/g, "/") === "readme.md");
   if (!hasReadme && files.length > 0) {
-    logger.debug("Builder: auto-generating README.md");
+    logger.debug("Builder: auto-generating README.md (mode-aware)");
     files.push({
       path: "README.md",
-      content: generateReadme(plan.taskSummary, files),
+      content: generateReadmeForMode(plan.mode, plan.taskSummary, files),
     });
   }
 

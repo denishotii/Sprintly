@@ -1,6 +1,13 @@
 export { PLANNER_SYSTEM_PROMPT } from "./planner.js";
-export { BUILDER_SYSTEM_PROMPT } from "./builder.js";
-export { VERIFIER_SYSTEM_PROMPT } from "./verifier.js";
+export {
+  BUILDER_SYSTEM_PROMPT,
+  WEBSITE_BUILDER_PROMPT,
+  REACT_BUILDER_PROMPT,
+  PYTHON_BUILDER_PROMPT,
+  NODE_BUILDER_PROMPT,
+  getBuilderPromptForMode,
+} from "./builder.js";
+export { VERIFIER_SYSTEM_PROMPT, getVerifierPrompt } from "./verifier.js";
 export { TEXT_RESPONSE_SYSTEM_PROMPT } from "./textResponse.js";
 export {
   TECH_STACK_RULES,
@@ -8,10 +15,14 @@ export {
   OUTPUT_STRUCTURE,
   HTML_QUALITY_RULES,
   CDN_URLS,
+  PERFORMANCE_RULES,
+  REACT_CDN_URLS,
+  getTechStackRules,
+  getOutputStructure,
 } from "./shared.js";
 
-// Import the concrete PlanTechStack type so BuilderContext stays type-safe
-import type { PlanTechStack } from "../pipeline/types.js";
+// Import concrete types so BuilderContext stays type-safe
+import type { PlanTechStack, ProjectMode } from "../pipeline/types.js";
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -25,8 +36,9 @@ export interface PlannerContext {
 export interface BuilderContext {
   jobPrompt: string;
   plan: {
+    mode: ProjectMode;
     taskSummary: string;
-    techStack: PlanTechStack;          // was: Record<string, unknown>
+    techStack: PlanTechStack;
     files: { path: string; description: string }[];
     designNotes: string;
     complexityEstimate: string;
@@ -76,10 +88,12 @@ export function assembleBuilderUserMessage(ctx: BuilderContext): string {
     `"""`,
     ``,
     `## Execution Plan`,
+    `Mode: ${ctx.plan.mode}`,
     `Task: ${ctx.plan.taskSummary}`,
     `Complexity: ${ctx.plan.complexityEstimate}`,
     ``,
     `Tech Stack:`,
+    `  Runtime: ${ctx.plan.techStack.runtime}`,
     `  Styling: ${ctx.plan.techStack.styling}`,
     `  Interactivity: ${ctx.plan.techStack.interactivity}`,
     `  Data Storage: ${ctx.plan.techStack.dataStorage}`,

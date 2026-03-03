@@ -1,7 +1,8 @@
 /**
- * Model pricing information (USD per 1M tokens)
+ * Centralized model pricing (per 1M tokens) for estimating spend.
+ * Values are approximate and can be tuned without touching business logic.
  */
-const MODEL_COSTS: Record<string, { input: number; output: number }> = {
+export const MODEL_COSTS: Record<string, { input: number; output: number }> = {
   "anthropic/claude-sonnet-4": { input: 3.0, output: 15.0 },
   "anthropic/claude-opus-4": { input: 15.0, output: 75.0 },
   "anthropic/claude-3.5-sonnet": { input: 3.0, output: 15.0 },
@@ -11,6 +12,9 @@ const MODEL_COSTS: Record<string, { input: number; output: number }> = {
   "openai/gpt-4-turbo": { input: 10.0, output: 30.0 },
   "openai/gpt-4o": { input: 5.0, output: 15.0 },
   "openai/gpt-4o-mini": { input: 0.15, output: 0.6 },
+  "meta-llama/llama-3.1-405b-instruct": { input: 3.0, output: 3.0 },
+  "meta-llama/llama-3.1-70b-instruct": { input: 0.5, output: 0.5 },
+  "google/gemini-pro-1.5": { input: 2.5, output: 7.5 },
   "claude-3-5-haiku-20241022": { input: 0.8, output: 4.0 },
   "claude-sonnet-4-20250514": { input: 3.0, output: 15.0 },
   "gpt-4o": { input: 5.0, output: 15.0 },

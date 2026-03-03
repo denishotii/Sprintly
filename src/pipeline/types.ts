@@ -5,14 +5,36 @@
 import type { ProjectFile } from "../tools/projectBuilder.js";
 
 // ─────────────────────────────────────────
+// Mode types
+// ─────────────────────────────────────────
+
+/**
+ * All supported project modes.
+ * - website:   Static landing pages, portfolios, marketing sites
+ * - web-app:   Interactive browser apps (no framework, vanilla JS/Alpine)
+ * - react-app: React/Vue apps loaded via CDN (no build step)
+ * - python:    Python scripts, Flask/Django apps
+ * - node:      Node.js scripts, Express APIs, CLI tools
+ * - text:      Writing, summaries, analysis (no project files)
+ */
+export type ProjectMode = "website" | "web-app" | "react-app" | "python" | "node" | "text";
+
+/** Modes that produce HTML output (browser-runnable). */
+export const WEB_MODES: ProjectMode[] = ["website", "web-app", "react-app"];
+
+/** Modes that produce server-side scripts. */
+export const SCRIPT_MODES: ProjectMode[] = ["python", "node"];
+
+// ─────────────────────────────────────────
 // Planner
 // ─────────────────────────────────────────
 
 /** Tech stack choices output by the Planner. */
 export interface PlanTechStack {
   styling: "tailwind" | "vanilla-css" | "both";
-  interactivity: "none" | "vanilla-js" | "alpine";
-  dataStorage: "none" | "localstorage" | "json-file";
+  interactivity: "none" | "vanilla-js" | "alpine" | "react" | "vue";
+  dataStorage: "none" | "localstorage" | "json-file" | "sqlite" | "filesystem";
+  runtime: "browser" | "python" | "node";
   charts: boolean;
   icons: boolean;
 }
@@ -25,7 +47,7 @@ export interface PlanFile {
 
 /** The structured JSON plan output by the Planner step. */
 export interface PlanResult {
-  mode: "code" | "text";
+  mode: ProjectMode;
   taskSummary: string;
   techStack: PlanTechStack;
   files: PlanFile[];
@@ -107,16 +129,16 @@ export interface StepTiming {
 
 /** The final result returned by the pipeline orchestrator. */
 export interface PipelineResult {
-  /** Task mode — "code" produced a zip, "text" produced a text response. */
-  mode: "code" | "text";
+  /** Task mode — specific mode from ProjectMode. */
+  mode: ProjectMode;
 
   /** Plain-text response (always set). For code tasks this is the submission message. */
   textResponse: string;
 
-  /** Absolute path to the zip file (only set for code tasks). */
+  /** Absolute path to the zip file (only set for non-text tasks). */
   zipPath?: string;
 
-  /** All files that went into the zip (only set for code tasks). */
+  /** All files that went into the zip (only set for non-text tasks). */
   files?: ProjectFile[];
 
   /** Absolute path to the temporary project directory (for cleanup). */

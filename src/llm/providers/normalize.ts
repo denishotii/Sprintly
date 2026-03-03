@@ -135,15 +135,19 @@ export function normalizeGenerateResult(result: GenerateTextResult): ProviderGen
     }
   }
 
-  const raw = result.usage ?? (result as GenerateTextResult).totalUsage;
-  const rawDict = raw as Record<string, any>;
-  const promptTokens = rawDict?.promptTokens ?? rawDict?.inputTokens ?? 0;
-  const completionTokens = rawDict?.completionTokens ?? rawDict?.outputTokens ?? 0;
-  const usage: ProviderUsage | undefined = raw
+  const raw = result.usage ?? result.totalUsage;
+  // Cast to a unified shape — both usage and totalUsage carry token counts under different field names
+  const rawTokens = raw as {
+    promptTokens?: number; completionTokens?: number;
+    inputTokens?: number; outputTokens?: number; totalTokens?: number;
+  } | undefined;
+  const promptTokens = rawTokens?.promptTokens ?? rawTokens?.inputTokens ?? 0;
+  const completionTokens = rawTokens?.completionTokens ?? rawTokens?.outputTokens ?? 0;
+  const usage: ProviderUsage | undefined = rawTokens
     ? {
         promptTokens,
         completionTokens,
-        totalTokens: rawDict?.totalTokens ?? promptTokens + completionTokens,
+        totalTokens: rawTokens.totalTokens ?? promptTokens + completionTokens,
       }
     : undefined;
 
