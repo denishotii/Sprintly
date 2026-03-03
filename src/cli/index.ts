@@ -70,7 +70,7 @@ program
   .option("-b, --budget <amount>", "Job budget in USD (default: interactive prompt)")
   .option("-p, --prompt <text>", "Job prompt text (default: interactive prompt)")
   .option("-t, --job-type <type>", "Job type: STANDARD or SWARM (default: STANDARD)")
-  .option("--test <key>", "Run a predefined E2E prompt (portfolio|taskapp|weather|landing|quiz) and verify structure")
+  .option("--test <key>", "Run a predefined E2E prompt and verify structure (e.g. landing, react, python, node, flask, express)")
   .action(simulateCommand);
 
 // Parse arguments

@@ -126,12 +126,10 @@ const NODE_TECH_STACK_RULES = [
 const REACT_OUTPUT_STRUCTURE = [
   "## Required Output Structure",
   "Every project zip must contain:",
-  "  index.html       ← entry point; ALL JSX must be inline in a <script type=\"text/babel\"> block",
-  "  README.md        ← always required",
+  "  index.html  ← THE ONLY FILE THAT RUNS. Contains CDN scripts + <div id=\"root\"> + entire React app in ONE inline <script type=\"text/babel\"> block. Do NOT load app code via script src=.",
+  "  README.md    ← always required",
   "",
-  "Optional (readable source copy only — NOT loaded via src=):",
-  "  scripts/app.jsx  ← reference copy of JSX components; the running code is in index.html",
-  "Optional: styles/main.css, assets/, data/",
+  "Optional: styles/main.css (inline in index.html or <style>). Do not add scripts/app.jsx or app.tsx — the app runs entirely from index.html.",
 ].join("\n");
 
 const PYTHON_OUTPUT_STRUCTURE = [

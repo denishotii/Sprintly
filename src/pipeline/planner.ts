@@ -151,7 +151,7 @@ function enforceRequiredFiles(
       break;
 
     case "react-app":
-      ensure("index.html", "Entry point loading React 18, ReactDOM, and Babel via CDN", true);
+      ensure("index.html", "Entry point: CDN scripts + entire React app in one inline <script type=\"text/babel\"> block", true);
       ensure("README.md",  "Project overview — open index.html in any browser");
       break;
 

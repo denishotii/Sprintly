@@ -48,9 +48,9 @@ You MUST respond with ONLY a valid JSON object — no markdown fences, no explan
 - Add extra files as needed (data/items.json, components/card.html, etc.)
 
 ### react-app
-- MUST include: index.html (entry point, loads React via CDN), README.md
-- Include scripts/app.jsx for React components
-- NO npm, NO package.json, NO webpack — React is loaded via unpkg CDN
+- MUST include ONLY: index.html (contains the entire React app in an inline <script type="text/babel"> block), README.md
+- Do NOT list scripts/app.jsx or scripts/app.tsx — the app must run entirely from index.html (external script src= fails when opening from file://)
+- NO TypeScript build — use JSX (Babel in browser). NO npm, NO webpack — React via unpkg CDN
 
 ### python
 - MUST include: main.py (or app.py for Flask/Django), requirements.txt, README.md
@@ -125,8 +125,7 @@ Example 3 — "Create a React todo app with add, complete, and delete functional
   "taskSummary": "React todo app with add, complete, and delete tasks, built with CDN React (no build step)",
   "techStack": { "styling": "tailwind", "interactivity": "react", "dataStorage": "localstorage", "runtime": "browser", "charts": false, "icons": false },
   "files": [
-    { "path": "index.html", "description": "Entry point: loads React 18, ReactDOM, Babel Standalone, and Tailwind via CDN; mounts <div id='root'>" },
-    { "path": "scripts/app.jsx", "description": "React components: App, TodoList, TodoItem, AddTodoForm with useState hooks" },
+    { "path": "index.html", "description": "Full entry point: CDN scripts (React, ReactDOM, Babel, Tailwind) + <div id='root'> + entire app in ONE inline <script type=\"text/babel\"> block — all components and createRoot().render() inside this file" },
     { "path": "README.md", "description": "Overview — open index.html in any browser, no installation needed" }
   ],
   "designNotes": "Clean, minimal UI with Tailwind. Checkbox to complete, trash icon to delete. Persists to localStorage.",

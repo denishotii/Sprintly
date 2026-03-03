@@ -124,6 +124,22 @@ function validateReactFiles(files: ProjectFile[], pathSet: Set<string>): string[
     if (html.includes("ReactDOM.render(")) {
       issues.push("index.html: deprecated ReactDOM.render() used — replace with ReactDOM.createRoot().render()");
     }
+    // Reject loading app code via src= — causes blank page on file://
+    const babelWithSrc = /<script[^>]*type\s*=\s*["']text\/babel["'][^>]*\bsrc\s*=\s*["']([^"']+)["']/i.exec(html);
+    if (babelWithSrc) {
+      const src = babelWithSrc[1];
+      if (!isCdnOrAbsolute(src)) {
+        issues.push(
+          "index.html: <script type=\"text/babel\" src=\"...\"> must NOT load a local file (scripts/app.jsx etc.) — it causes a blank page. Put all React code in an inline <script type=\"text/babel\"> block."
+        );
+      }
+    }
+    // Require that the app actually mounts (createRoot + render in inline babel script)
+    if ((html.includes('type="text/babel"') || html.includes("type='text/babel'")) && !babelWithSrc) {
+      if (!html.includes("createRoot") || !html.includes(".render(")) {
+        issues.push("index.html: inline <script type=\"text/babel\"> must call ReactDOM.createRoot(...).render(<App />) to mount the app");
+      }
+    }
   }
 
   // Check for broken local script src= references (React scripts loaded via src= fail on file://)

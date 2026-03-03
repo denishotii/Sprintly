@@ -147,8 +147,14 @@ export const BUILDER_SYSTEM_PROMPT = WEBSITE_BUILDER_PROMPT;
 export const REACT_BUILDER_PROMPT = `
 You are an expert React developer with 10+ years of experience building production-ready browser applications. You build React apps that run by opening index.html — no npm, no webpack, no vite. You are about to build a complete React project from a plan.
 
+## CRITICAL — RUNNABLE REACT (must follow or the app will be blank)
+1. **No TypeScript in the browser.** We only have Babel for JSX. Write JavaScript + JSX only (no .tsx, no type syntax). If the user asked for "TypeScript", build the same app in JSX and mention in the README: "React with JSX (TypeScript-style structure and naming)."
+2. **The entire React app MUST live in ONE inline \`<script type="text/babel">\` block inside index.html.** Put ALL components, state, and \`ReactDOM.createRoot(...).render(<App />)\` in that single inline script. Do NOT use \`<script type="text/babel" src="scripts/app.jsx">\` or any script src= pointing to your app code — that causes a blank page when opened from the filesystem (Chrome blocks file:// XHR).
+3. **index.html must run by itself.** Open index.html in a browser → the app must render. No separate .jsx/.tsx file should be loaded; if you include scripts/app.jsx as a reference copy, do NOT reference it from index.html.
+4. **Do not output scripts/app.tsx or scripts/app.jsx as a file that index.html loads.** The plan may only ask for index.html and README.md — that is correct. All runnable code goes in index.html.
+
 ## Your Mission
-Build every file listed in the plan. Every file must be complete, functional, and production-quality. No placeholders. No "TODO" comments. Use real React patterns: components, hooks, and clear state management.
+Build every file listed in the plan. The main deliverable is a single index.html that contains the full React app in an inline script. No placeholders. No "TODO" comments. Use real React patterns: function components, hooks (useState, useEffect), and ReactDOM.createRoot().render().
 
 ${getTechStackRules("react-app")}
 
@@ -171,21 +177,21 @@ ${CREATE_PROJECT_INSTRUCTIONS}
    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 5. Mount target: <div id="root"></div>
-6. Your app — ALWAYS use an INLINE \`<script type="text/babel">\` block, NEVER use src=.
-   Example:
+6. Your app — ONE inline \`<script type="text/babel">\` block containing the ENTIRE app (all components + createRoot + render). Example:
    <script type="text/babel">
+     const { useState } = React;
      function App() {
-       return <h1>Hello world</h1>;
+       const [items, setItems] = useState([]);
+       return (
+         <div>
+           <h1>Todo</h1>
+           {/* ... your components ... */}
+         </div>
+       );
      }
      const root = ReactDOM.createRoot(document.getElementById('root'));
      root.render(<App />);
    </script>
-
-Why inline only? Babel Standalone loads external src= files via XHR. Chrome blocks XHR from
-file:// origins, so \`<script type="text/babel" src="scripts/app.jsx">\` produces a blank page
-when the file is opened from the filesystem. Inline JSX works in every environment without
-restrictions. If the plan lists a scripts/app.jsx file, include it as a readable source copy,
-but the running code must be the inline block inside index.html.
 
 ## React Code Standards
 - Component-based architecture. Use function components with hooks: useState, useEffect, useRef, useCallback, useMemo. Use useReducer for complex state.
@@ -202,12 +208,13 @@ but the running code must be the inline block inside index.html.
 Include: project name, one-line description, "Open index.html in any modern browser. No installation required.", features list, tech stack (React 18 via CDN, Tailwind if used).
 
 ## Final Checklist Before Submitting
+- [ ] The entire React app is in ONE inline \`<script type="text/babel">\` in index.html — no script src= to scripts/app.jsx or app.tsx
 - [ ] CDN scripts load in order: React -> ReactDOM -> Babel -> your inline script
-- [ ] JSX is in an inline \`<script type="text/babel">\` block — NOT loaded via src=
-- [ ] ReactDOM.createRoot().render() is used — NOT the deprecated ReactDOM.render()
-- [ ] <div id="root"> appears BEFORE the JSX script tag in the body
-- [ ] create_project is called once with ALL files (index.html, README.md, and any others in the plan)
-- [ ] No import statements or require() calls — React and ReactDOM are window globals
+- [ ] ReactDOM.createRoot().render() is used — NOT ReactDOM.render()
+- [ ] <div id="root"> appears BEFORE the inline script in the body
+- [ ] create_project is called with index.html (with full inline app) and README.md — no separate app.jsx/app.tsx required
+- [ ] No TypeScript syntax — JSX only (Babel does not compile TypeScript in the browser)
+- [ ] No import/require — React and ReactDOM are window globals
 `.trim();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -237,6 +244,14 @@ ${CREATE_PROJECT_INSTRUCTIONS}
 - Entry point: The main entry (main.py or app.py) must include \`if __name__ == '__main__':\` and call the main logic from there. No top-level side effects that run on import.
 - Error handling: Use try/except with specific exception types. Provide helpful error messages. Avoid bare except. Use logging for diagnostics where appropriate.
 - Naming: Meaningful variable and function names. Constants in UPPER_SNAKE_CASE.
+- Imports: Put all imports at the top of the file (after the module docstring). No inline \`import re\` or other imports inside functions — it hurts readability and tooling.
+
+## Resilience and robustness (scripts that call the network or external services)
+- Use a sensible timeout for HTTP requests (e.g. 15–20 seconds). Never leave the default no-timeout (hangs indefinitely).
+- On timeout or connection error: log the error and print a short, user-friendly message (e.g. "The service didn't respond in time. Check your connection and try again.") then sys.exit(1). Do not leave the user with a raw exception.
+- Prefer one or two retries with short backoff (e.g. 1s, then 2s) for transient failures when the task is "fetch data from the internet."
+- When the task involves weather data: prefer a reliable free API that does not require an API key when possible (e.g. Open-Meteo: \`https://api.open-meteo.com/v1/forecast?latitude=...&longitude=...\` — free, no key, JSON). If you use scraping (e.g. wttr.in), handle timeouts and connection errors gracefully and mention in the README that the service can sometimes be slow or unavailable.
+- If the primary data source is unreliable, consider a fallback (e.g. try Open-Meteo first, then wttr.in) or document clearly how to retry.
 
 ## requirements.txt
 List every third-party package the project imports. Use version pins where practical (e.g. requests>=2.28.0,<3). One package per line. No comments unless needed for platform-specific notes.

@@ -7,7 +7,7 @@ import { getConfig } from "../../config/index.js";
 import { cleanupProject } from "../../tools/projectBuilder.js";
 import { runPipeline } from "../../pipeline/index.js";
 import { validateFiles } from "../../pipeline/verifier.js";
-import { getTestPrompt, E2E_PROMPT_KEYS } from "./e2e-prompts.js";
+import { getTestPrompt, E2E_PROMPT_KEYS, E2E_PROMPT_KEYS_HELP } from "./e2e-prompts.js";
 import type { PipelineStepName } from "../../pipeline/types.js";
 import type { Job, TokenUsage } from "../../types/index.js";
 
@@ -89,7 +89,7 @@ export async function simulateCommand(options: SimulateOptions): Promise<void> {
     const testPrompt = getTestPrompt(testKey);
     if (!testPrompt) {
       console.log(chalk.red(`Unknown test key: ${testKey}`));
-      console.log(chalk.gray(`Available: ${E2E_PROMPT_KEYS.join(", ")}`));
+      console.log(chalk.gray(`Available: ${E2E_PROMPT_KEYS_HELP}`));
       process.exit(1);
     }
     prompt = testPrompt;
@@ -181,8 +181,8 @@ export async function simulateCommand(options: SimulateOptions): Promise<void> {
     });
 
     const elapsedMs = Date.now() - startTime;
-    const elapsed = (elapsedMs / 1000).toFixed(1);
-    spinner.succeed(`Pipeline complete in ${elapsed}s`);
+    const elapsedSec = (elapsedMs / 1000).toFixed(1);
+    spinner.succeed(`Pipeline complete in ${elapsedSec}s (mode: ${result.mode})`);
 
     // Token usage: use textResponseModel for text tasks, builderModel for code tasks
     const modelForCost =
@@ -207,13 +207,14 @@ export async function simulateCommand(options: SimulateOptions): Promise<void> {
       };
     }
 
-    // Pipeline timing summary
+    // Pipeline timing summary (how long each step took)
     if (result.timings?.length) {
-      console.log(chalk.cyan("\n⏱  Pipeline steps:"));
+      console.log(chalk.cyan("\n⏱  Timing:"));
       for (const t of result.timings) {
-        console.log(chalk.gray(`  ${t.step}: ${t.durationMs}ms`));
+        const sec = (t.durationMs / 1000).toFixed(2);
+        console.log(chalk.gray(`  ${t.step.padEnd(10)} ${t.durationMs}ms (${sec}s)`));
       }
-      console.log(chalk.gray(`  Total: ${elapsedMs}ms`));
+      console.log(chalk.gray(`  ${"total".padEnd(10)} ${elapsedMs}ms (${elapsedSec}s)`));
     }
 
     // Project build info (code mode)
@@ -229,15 +230,27 @@ export async function simulateCommand(options: SimulateOptions): Promise<void> {
       console.log(chalk.yellow(`\n  Project saved locally (not uploaded).`));
       console.log(chalk.gray(`  In production, this zip would be uploaded and submitted.`));
 
-      // T12: verify zip structure (index.html, README, no broken refs)
+      // E2E: verify structure (mode-aware: web vs python vs node)
       if (isE2ETest) {
-        const validation = validateFiles(result.files);
-        console.log(chalk.cyan("\n🔍 Structure verification:"));
+        const validation = validateFiles(result.files, result.mode);
+        console.log(chalk.cyan("\n🔍 Structure verification (" + result.mode + "):"));
         if (validation.passed) {
-          console.log(chalk.green("  ✓ index.html present"));
+          if (
+            result.mode === "website" ||
+            result.mode === "web-app" ||
+            result.mode === "react-app"
+          ) {
+            console.log(chalk.green("  ✓ Entry point (index.html) present"));
+            if (result.mode !== "react-app") {
+              console.log(chalk.green("  ✓ styles/main.css present"));
+            }
+          } else if (result.mode === "python") {
+            console.log(chalk.green("  ✓ Python entry (main.py / app.py) + requirements.txt + README"));
+          } else if (result.mode === "node") {
+            console.log(chalk.green("  ✓ Node entry + package.json + README"));
+          }
           console.log(chalk.green("  ✓ README.md present with content"));
           console.log(chalk.green("  ✓ No empty files"));
-          console.log(chalk.green("  ✓ HTML structure and local references OK"));
         } else {
           console.log(chalk.red("  Issues found:"));
           for (const issue of validation.issues) {
@@ -266,7 +279,7 @@ export async function simulateCommand(options: SimulateOptions): Promise<void> {
     // Summary
     console.log(chalk.green("\n✓ Simulation complete!"));
     console.log(chalk.gray("  Same pipeline as production; response would be submitted to Seedstr."));
-    console.log(chalk.gray(`  Total response time: ${elapsed}s`));
+    console.log(chalk.gray(`  Mode: ${result.mode}  |  Total time: ${elapsedSec}s`));
 
     if (budget > 0 && usage) {
       const profitMargin = budget - usage.estimatedCost;
