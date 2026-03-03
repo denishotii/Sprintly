@@ -136,13 +136,14 @@ export function normalizeGenerateResult(result: GenerateTextResult): ProviderGen
   }
 
   const raw = result.usage ?? (result as GenerateTextResult).totalUsage;
-  const promptTokens = raw?.promptTokens ?? (raw as { inputTokens?: number })?.inputTokens ?? 0;
-  const completionTokens = raw?.completionTokens ?? (raw as { outputTokens?: number })?.outputTokens ?? 0;
+  const rawDict = raw as Record<string, any>;
+  const promptTokens = rawDict?.promptTokens ?? rawDict?.inputTokens ?? 0;
+  const completionTokens = rawDict?.completionTokens ?? rawDict?.outputTokens ?? 0;
   const usage: ProviderUsage | undefined = raw
     ? {
         promptTokens,
         completionTokens,
-        totalTokens: (raw as { totalTokens?: number }).totalTokens ?? promptTokens + completionTokens,
+        totalTokens: rawDict?.totalTokens ?? promptTokens + completionTokens,
       }
     : undefined;
 

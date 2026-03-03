@@ -8,6 +8,7 @@ import { profileCommand } from "./commands/profile.js";
 import { statusCommand } from "./commands/status.js";
 import { runCommand } from "./commands/run.js";
 import { simulateCommand } from "./commands/simulate.js";
+import { retryJobCommand } from "./commands/retry-job.js";
 
 // Display banner
 console.log(
@@ -72,6 +73,15 @@ program
   .option("-t, --job-type <type>", "Job type: STANDARD or SWARM (default: STANDARD)")
   .option("--test <key>", "Run a predefined E2E prompt (portfolio|taskapp|weather|landing|quiz) and verify structure")
   .action(simulateCommand);
+
+// Retry job command
+program
+  .command("retry-job [jobId]")
+  .description("Retry a job that failed during processing")
+  .option("--list", "List all failed jobs available for retry")
+  .action((jobId: string | undefined, options) =>
+    retryJobCommand({ jobId, list: options.list })
+  );
 
 // Parse arguments
 program.parse();

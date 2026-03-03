@@ -12,6 +12,7 @@ import { logger } from "../utils/logger.js";
 import { runPlanner } from "./planner.js";
 import { runBuilder } from "./builder.js";
 import { runVerifier } from "./verifier.js";
+import { cleanupBuilderExecution } from "../llm/client.js";
 import type {
   PipelineOptions,
   PipelineResult,
@@ -76,148 +77,156 @@ function addUsage(a: StepUsage, b: StepUsage | undefined): StepUsage {
  * @returns PipelineResult — includes zipPath (code tasks) or textResponse (text tasks).
  */
 export async function runPipeline(options: PipelineOptions): Promise<PipelineResult> {
-  const { jobPrompt, budget = 0, onStepComplete } = options;
+  const { jobPrompt, budget = 0, onStepComplete, executionId } = options;
   const timings: StepTiming[] = [];
   let totalUsage: StepUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
   logger.info(`Pipeline: starting for prompt="${jobPrompt.substring(0, 80)}..."`);
 
-  // ─── Optional: skip planner for obvious text-only prompts (saves ~2–3s) ───
-  let plan: PlanResult;
-  let plannerMs: number;
+  try {
+    // ─── Optional: skip planner for obvious text-only prompts (saves ~2–3s) ───
+    let plan: PlanResult;
+    let plannerMs: number;
 
-  if (isLikelyTextOnlyPrompt(jobPrompt)) {
-    logger.info("Pipeline: text-like prompt — skipping planner (fast path)");
-    plan = { ...SYNTHETIC_TEXT_PLAN, taskSummary: jobPrompt.substring(0, 120) };
-    plannerMs = 0;
-    timings.push({ step: "planner", durationMs: 0 });
-    onStepComplete?.("planner", { durationMs: 0 });
-  } else {
-    // ─── Step 1: Planner ───────────────────────────────────────
-    logger.info("Pipeline: [1/3] Planner");
-    const [plannerResult, ms] = await timed(() => runPlanner(jobPrompt, budget));
-    plannerMs = ms;
-    plan = plannerResult.plan;
-    timings.push({ step: "planner", durationMs: plannerMs });
-    totalUsage = addUsage(totalUsage, plannerResult.usage);
-    onStepComplete?.("planner", { durationMs: plannerMs });
-    logger.info(
-      `Pipeline: planner done in ${plannerMs}ms — mode=${plan.mode}, files=${plan.files.length}, complexity=${plan.complexityEstimate}`
-    );
-  }
+    if (isLikelyTextOnlyPrompt(jobPrompt)) {
+      logger.info("Pipeline: text-like prompt — skipping planner (fast path)");
+      plan = { ...SYNTHETIC_TEXT_PLAN, taskSummary: jobPrompt.substring(0, 120) };
+      plannerMs = 0;
+      timings.push({ step: "planner", durationMs: 0 });
+      onStepComplete?.("planner", { durationMs: 0 });
+    } else {
+      // ─── Step 1: Planner ───────────────────────────────────────
+      logger.info("Pipeline: [1/3] Planner");
+      const [plannerResult, ms] = await timed(() => runPlanner(jobPrompt, budget));
+      plannerMs = ms;
+      plan = plannerResult.plan;
+      timings.push({ step: "planner", durationMs: plannerMs });
+      totalUsage = addUsage(totalUsage, plannerResult.usage);
+      onStepComplete?.("planner", { durationMs: plannerMs });
+      logger.info(
+        `Pipeline: planner done in ${plannerMs}ms — mode=${plan.mode}, files=${plan.files.length}, complexity=${plan.complexityEstimate}`
+      );
+    }
 
-  // ─── Text-mode fast path ───────────────────────────────────
-  if (plan.mode === "text") {
-    logger.info("Pipeline: text task — skipping builder/verifier, generating response directly");
+    // ─── Text-mode fast path ───────────────────────────────────
+    if (plan.mode === "text") {
+      logger.info("Pipeline: text task — skipping builder/verifier, generating response directly");
+
+      const [buildResult, builderMs] = await timed(() => runBuilder(jobPrompt, plan));
+
+      timings.push({ step: "builder", durationMs: builderMs });
+      totalUsage = addUsage(totalUsage, buildResult.usage);
+      onStepComplete?.("builder", { durationMs: builderMs });
+
+      logger.info(`Pipeline: text response generated in ${builderMs}ms`);
+      logTimingSummary(timings);
+
+      return {
+        mode: "text",
+        textResponse: buildResult.textResponse ?? "",
+        timings,
+        totalUsage,
+      };
+    }
+
+    // ─── Step 2: Builder ───────────────────────────────────────
+    logger.info(`Pipeline: [2/3] Builder — creating ${plan.files.length} file(s)`);
 
     const [buildResult, builderMs] = await timed(() => runBuilder(jobPrompt, plan));
 
     timings.push({ step: "builder", durationMs: builderMs });
     totalUsage = addUsage(totalUsage, buildResult.usage);
-    onStepComplete?.("builder", { durationMs: builderMs });
+    onStepComplete?.("builder", { durationMs: builderMs, fileCount: buildResult.files.length });
 
-    logger.info(`Pipeline: text response generated in ${builderMs}ms`);
+    logger.info(
+      `Pipeline: builder done in ${builderMs}ms — ${buildResult.files.length} file(s) generated`
+    );
+
+    if (buildResult.files.length === 0) {
+      // Builder produced nothing — return text response as fallback
+      logger.warn("Pipeline: builder produced no files, falling back to text response");
+      return {
+        mode: "text",
+        textResponse: buildResult.textResponse ?? "I was unable to generate the project files. Please try again.",
+        timings,
+        totalUsage,
+      };
+    }
+
+    // ─── Step 3: Verifier ──────────────────────────────────────
+    logger.info("Pipeline: [3/3] Verifier");
+
+    const [verifyResult, verifierMs] = await timed(() =>
+      runVerifier(jobPrompt, buildResult.files)
+    );
+
+    timings.push({ step: "verifier", durationMs: verifierMs });
+    totalUsage = addUsage(totalUsage, verifyResult.usage);
+    onStepComplete?.("verifier", {
+      durationMs: verifierMs,
+      issuesCount: verifyResult.issuesFound.length,
+    });
+
+    logger.info(
+      `Pipeline: verifier done in ${verifierMs}ms — ` +
+      `llmRan=${verifyResult.llmVerifierRan}, issues=${verifyResult.issuesFound.length}`
+    );
+
+    if (verifyResult.issuesFound.length > 0) {
+      logger.debug("Pipeline: issues found and addressed:");
+      for (const issue of verifyResult.issuesFound) {
+        logger.debug(`  - ${issue}`);
+      }
+    }
+
+    // ─── Zip the project ──────────────────────────────────────
+    logger.info("Pipeline: zipping project...");
+
+    const projectName = slugify(plan.taskSummary);
+    const [buildOutput, zipMs] = await timed(() =>
+      buildProject(projectName, verifyResult.files)
+    );
+
+    timings.push({ step: "zip", durationMs: zipMs });
+    onStepComplete?.("zip", { durationMs: zipMs, fileCount: buildOutput.files?.length ?? 0 });
+
+    if (!buildOutput.success) {
+      logger.error(`Pipeline: zip failed — ${buildOutput.error}`);
+      return {
+        mode: "text",
+        textResponse: "The project was built but could not be packaged. Please try again.",
+        timings,
+        totalUsage,
+      };
+    }
+
+    logger.info(
+      `Pipeline: zip created in ${zipMs}ms — ${buildOutput.files.length} files, ` +
+      `${(buildOutput.totalSize / 1024).toFixed(1)} KB`
+    );
+
     logTimingSummary(timings);
 
+    // Build a submission message
+    const textResponse = buildSubmissionMessage(plan.taskSummary, buildOutput.files, verifyResult.issuesFound);
+
     return {
-      mode: "text",
-      textResponse: buildResult.textResponse ?? "",
+      mode: "code",
+      textResponse,
+      zipPath: buildOutput.zipPath,
+      files: verifyResult.files,
+      projectDir: buildOutput.projectDir,
+      issuesFixed: verifyResult.issuesFound.length > 0 ? verifyResult.issuesFound : undefined,
       timings,
       totalUsage,
     };
-  }
-
-  // ─── Step 2: Builder ───────────────────────────────────────
-  logger.info(`Pipeline: [2/3] Builder — creating ${plan.files.length} file(s)`);
-
-  const [buildResult, builderMs] = await timed(() => runBuilder(jobPrompt, plan));
-
-  timings.push({ step: "builder", durationMs: builderMs });
-  totalUsage = addUsage(totalUsage, buildResult.usage);
-  onStepComplete?.("builder", { durationMs: builderMs, fileCount: buildResult.files.length });
-
-  logger.info(
-    `Pipeline: builder done in ${builderMs}ms — ${buildResult.files.length} file(s) generated`
-  );
-
-  if (buildResult.files.length === 0) {
-    // Builder produced nothing — return text response as fallback
-    logger.warn("Pipeline: builder produced no files, falling back to text response");
-    return {
-      mode: "text",
-      textResponse: buildResult.textResponse ?? "I was unable to generate the project files. Please try again.",
-      timings,
-      totalUsage,
-    };
-  }
-
-  // ─── Step 3: Verifier ──────────────────────────────────────
-  logger.info("Pipeline: [3/3] Verifier");
-
-  const [verifyResult, verifierMs] = await timed(() =>
-    runVerifier(jobPrompt, buildResult.files)
-  );
-
-  timings.push({ step: "verifier", durationMs: verifierMs });
-  totalUsage = addUsage(totalUsage, verifyResult.usage);
-  onStepComplete?.("verifier", {
-    durationMs: verifierMs,
-    issuesCount: verifyResult.issuesFound.length,
-  });
-
-  logger.info(
-    `Pipeline: verifier done in ${verifierMs}ms — ` +
-    `llmRan=${verifyResult.llmVerifierRan}, issues=${verifyResult.issuesFound.length}`
-  );
-
-  if (verifyResult.issuesFound.length > 0) {
-    logger.debug("Pipeline: issues found and addressed:");
-    for (const issue of verifyResult.issuesFound) {
-      logger.debug(`  - ${issue}`);
+  } finally {
+    // Cleanup builder execution context if executionId was provided
+    if (executionId) {
+      cleanupBuilderExecution(executionId);
+      logger.debug(`Pipeline: cleaned up builder context for execution ${executionId}`);
     }
   }
-
-  // ─── Zip the project ──────────────────────────────────────
-  logger.info("Pipeline: zipping project...");
-
-  const projectName = slugify(plan.taskSummary);
-  const [buildOutput, zipMs] = await timed(() =>
-    buildProject(projectName, verifyResult.files)
-  );
-
-  timings.push({ step: "zip", durationMs: zipMs });
-  onStepComplete?.("zip", { durationMs: zipMs, fileCount: buildOutput.files?.length ?? 0 });
-
-  if (!buildOutput.success) {
-    logger.error(`Pipeline: zip failed — ${buildOutput.error}`);
-    return {
-      mode: "text",
-      textResponse: "The project was built but could not be packaged. Please try again.",
-      timings,
-      totalUsage,
-    };
-  }
-
-  logger.info(
-    `Pipeline: zip created in ${zipMs}ms — ${buildOutput.files.length} files, ` +
-    `${(buildOutput.totalSize / 1024).toFixed(1)} KB`
-  );
-
-  logTimingSummary(timings);
-
-  // Build a submission message
-  const textResponse = buildSubmissionMessage(plan.taskSummary, buildOutput.files, verifyResult.issuesFound);
-
-  return {
-    mode: "code",
-    textResponse,
-    zipPath: buildOutput.zipPath,
-    files: verifyResult.files,
-    projectDir: buildOutput.projectDir,
-    issuesFixed: verifyResult.issuesFound.length > 0 ? verifyResult.issuesFound : undefined,
-    timings,
-    totalUsage,
-  };
 }
 
 // ─────────────────────────────────────────

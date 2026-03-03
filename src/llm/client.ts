@@ -1,5 +1,6 @@
 import { tool, zodSchema, type Tool } from "ai";
 import { z } from "zod";
+import { randomUUID } from "crypto";
 import { getConfig } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { webSearch, type WebSearchResult } from "../tools/webSearch.js";
@@ -52,15 +53,32 @@ export interface LLMResponse {
   finishReason?: string;
   // If a project was built during this response
   projectBuild?: ProjectBuildResult;
+  // Unique execution context ID for tracking builders across concurrent jobs
+  executionId?: string;
 }
 
-// Active project builder instance (one per generation)
-// Using a type assertion to work around TypeScript narrowing issues
-let activeProjectBuilder: ProjectBuilder | null = null;
+/**
+ * Per-execution builder registry - supports concurrent pipeline executions.
+ * Maps executionId → ProjectBuilder instance.
+ * Builders are cleaned up after project finalization.
+ */
+const builderRegistry = new Map<string, ProjectBuilder>();
 
-// Helper to get the project builder with correct typing
-function getActiveBuilder(): ProjectBuilder | null {
-  return activeProjectBuilder;
+/**
+ * Get or create a builder for this execution context
+ */
+function getBuilderForExecution(executionId: string): ProjectBuilder {
+  if (!builderRegistry.has(executionId)) {
+    builderRegistry.set(executionId, new ProjectBuilder());
+  }
+  return builderRegistry.get(executionId)!;
+}
+
+/**
+ * Clean up builder after execution completes
+ */
+function cleanupBuilder(executionId: string): void {
+  builderRegistry.delete(executionId);
 }
 
 /**
@@ -123,6 +141,8 @@ export interface GenerateOptions {
   toolChoice?: "auto" | "required" | "none";
   /** When 'builder', only create_project, create_file, finalize_project are passed so the model is not distracted by web_search/calculator. */
   toolsFilter?: "all" | "builder";
+  /** Execution context ID for tracking builders across concurrent jobs */
+  executionId?: string;
 }
 
 /** Pipeline step names; each can use its own model (see config plannerModel, builderModel, verifierModel, textResponseModel). */
@@ -224,8 +244,9 @@ export class LLMClient {
   /**
    * Get available tools based on configuration.
    * @param filter - 'all' (default) returns every enabled tool; 'builder' returns only create_project, create_file, finalize_project for the pipeline builder step.
+   * @param executionId - Execution context ID for tracking builders across concurrent jobs
    */
-  private getTools(filter?: "all" | "builder"): Record<string, Tool> {
+  private getTools(filter?: "all" | "builder", executionId?: string): Record<string, Tool> {
     const config = getConfig();
     const tools: Record<string, Tool> = {};
 
@@ -320,10 +341,8 @@ export class LLMClient {
         execute: async ({ projectName, files }: { projectName: string; files: ProjectFile[] }) => {
           logger.tool("create_project", "start", `${projectName} (${files?.length ?? 0} files)`);
           try {
-            const builder = new ProjectBuilder(projectName);
+            const builder = getBuilderForExecution(executionId || "default");
             builder.createBatch(projectName, files);
-            // Expose builder so the verifier can patch individual files via create_file
-            activeProjectBuilder = builder;
             const result = await builder.createZip(`${projectName}.zip`);
             logger.tool("create_project", "success", `${result.zipPath} (${result.files.length} files)`);
             return {
@@ -358,16 +377,12 @@ export class LLMClient {
         execute: async ({ path, content }: { path: string; content: string }) => {
           logger.tool("create_file", "start", `Creating: ${path}`);
           try {
-            // Initialize project builder if not exists
-            if (!activeProjectBuilder) {
-              activeProjectBuilder = new ProjectBuilder();
-            }
-            
-            activeProjectBuilder.addFile(path, content);
-            
-            const files = activeProjectBuilder.getFiles();
+            const builder = getBuilderForExecution(executionId || "default");
+            builder.addFile(path, content);
+
+            const files = builder.getFiles();
             logger.tool("create_file", "success", `Created ${path}, total files: ${files.length}`);
-            
+
             return {
               success: true,
               path,
@@ -382,7 +397,7 @@ export class LLMClient {
         },
       });
 
-      tools.finalize_project = tool({
+        tools.finalize_project = tool({
         description: `Package all files created with create_file into a downloadable zip. Call this after creating all project files. Only use when you've built a real code project.`,
         inputSchema: zodSchema(z.object({
           projectName: z
@@ -392,13 +407,15 @@ export class LLMClient {
         execute: async ({ projectName }: { projectName: string }) => {
           logger.tool("finalize_project", "start", `Finalizing: ${projectName}`);
           try {
-            if (!activeProjectBuilder) {
+            const builder = getBuilderForExecution(executionId || "default");
+            const files = builder.getFiles();
+            if (files.length === 0) {
               throw new Error("No files have been created. Use create_file first.");
             }
-            
-            const result = await activeProjectBuilder.createZip(`${projectName}.zip`);
+
+            const result = await builder.createZip(`${projectName}.zip`);
             logger.tool("finalize_project", "success", `Created ${result.zipPath} (${result.totalSize} bytes)`);
-            
+
             return {
               success: result.success,
               projectName,
@@ -435,21 +452,24 @@ export class LLMClient {
     step: PipelineStep,
     options: GenerateOptions
   ): Promise<LLMResponse> {
-    // Reset builder only at pipeline start (planner); builder/verifier share the same project
+    // Create or reuse execution context ID for concurrent job safety
+    const executionId = options.executionId || randomUUID();
+
+    // Create a fresh builder for planner step (start of pipeline)
     if (step === "planner") {
-      activeProjectBuilder = null;
+      getBuilderForExecution(executionId); // Initialize
     }
 
     const model = this.getModelForStep(step);
     const provider = this.getProviderForModel(model);
     const toolsFilter = options.toolsFilter ?? (step === "builder" || step === "textResponse" ? "builder" : "all");
-    const tools = options.tools !== false ? this.getTools(toolsFilter) : undefined;
+    const tools = options.tools !== false ? this.getTools(toolsFilter, executionId) : undefined;
     const toolChoice =
       options.toolChoice ??
       (step === "builder" && tools?.create_project
         ? { type: "tool" as const, toolName: "create_project" }
         : undefined);
-    return this.executeGenerationWithProvider(provider, model, {
+    const result = await this.executeGenerationWithProvider(provider, model, {
       prompt: options.prompt,
       systemPrompt: options.systemPrompt,
       maxTokens: options.maxTokens ?? this.maxTokens,
@@ -457,6 +477,12 @@ export class LLMClient {
       tools,
       toolChoice,
     });
+
+    // Propagate executionId for next pipeline step
+    return {
+      ...result,
+      executionId,
+    };
   }
 
   /**
@@ -473,10 +499,10 @@ export class LLMClient {
 
     logger.debug(`Generating response with provider: ${this.primaryProvider.name}`);
 
-    // Reset project builder for each generation
-    activeProjectBuilder = null;
+    // Create execution context for builder tracking
+    const executionId = options.executionId || randomUUID();
 
-    const tools = enableTools ? this.getTools() : undefined;
+    const tools = enableTools ? this.getTools("all", executionId) : undefined;
     const hasTools = tools && Object.keys(tools).length > 0;
 
     let lastError: unknown;
@@ -491,35 +517,34 @@ export class LLMClient {
           undefined,
           { prompt, systemPrompt, maxTokens, temperature, tools: hasTools ? tools : undefined }
         );
-        
-        return result;
+
+        return {
+          ...result,
+          executionId,
+        };
       } catch (error) {
         lastError = error;
-        
+
         if (isRetryableError(error) && attempt < retryConfig.maxRetries) {
           const delay = getRetryDelay(attempt, retryConfig);
           logger.warn(
             `LLM generation failed with retryable error (attempt ${attempt + 1}/${retryConfig.maxRetries + 1}), ` +
             `retrying in ${delay}ms: ${(error as Error).message?.substring(0, 100)}`
           );
-          
-          // Reset project builder before retry
-          activeProjectBuilder = null;
-          
+
           await sleep(delay);
           attempt++;
           continue;
         }
-        
+
         // Not retryable or exhausted retries - try fallback if tools were enabled
         if (hasTools && retryConfig.fallbackNoTools && attempt >= retryConfig.maxRetries && isRetryableError(error)) {
           logger.warn(
             `Exhausted ${retryConfig.maxRetries} retries for tool calling, attempting fallback without tools`
           );
-          
+
           try {
-            // Reset and try without tools
-            activeProjectBuilder = null;
+            // Try without tools
             const fallbackResult = await this.executeGenerationWithProvider(
               this.primaryProvider,
               undefined,
@@ -533,14 +558,17 @@ export class LLMClient {
             );
             
             logger.info("Fallback generation without tools succeeded");
-            return fallbackResult;
+            return {
+              ...fallbackResult,
+              executionId,
+            };
           } catch (fallbackError) {
             logger.error("Fallback generation also failed:", fallbackError);
             // Throw the original error as it's more informative
             throw lastError;
           }
         }
-        
+
         // Re-throw non-retryable errors immediately
         throw error;
       }
@@ -601,11 +629,10 @@ export class LLMClient {
         totalSize: number;
         error?: string;
       };
-      const builder = getActiveBuilder();
-      if (finalizeResult.success && builder) {
+      if (finalizeResult.success) {
         projectBuild = {
           success: true,
-          projectDir: builder.getProjectDir(),
+          projectDir: finalizeResult.zipPath.replace(/[^/]*\.zip$/, ""), // Extract dir from zip path
           zipPath: finalizeResult.zipPath,
           files: finalizeResult.files,
           totalSize: finalizeResult.totalSize,
@@ -638,12 +665,21 @@ export class LLMClient {
       projectBuild,
     };
   }
-  
+
   /**
-   * Get the active project builder (if any)
+   * Clean up builder resources after pipeline completes (call this from runPipeline).
+   */
+  cleanupExecution(executionId: string): void {
+    cleanupBuilder(executionId);
+  }
+
+  /**
+   * Get the active project builder for a specific execution (legacy support).
+   * @deprecated Use executionId tracking instead for concurrent job safety
    */
   getActiveProjectBuilder(): ProjectBuilder | null {
-    return activeProjectBuilder;
+    // For backwards compatibility, return null - execution-scoped builders are the new way
+    return null;
   }
 
   /**
@@ -680,6 +716,14 @@ export function getLLMClient(): LLMClient {
     llmClientInstance = new LLMClient();
   }
   return llmClientInstance;
+}
+
+/**
+ * Export cleanupBuilder for external use (e.g., from pipeline orchestrator)
+ * Cleans up builder resources after pipeline execution completes
+ */
+export function cleanupBuilderExecution(executionId: string): void {
+  cleanupBuilder(executionId);
 }
 
 export default LLMClient;

@@ -285,6 +285,8 @@ export type AgentEvent =
   | { type: "files_uploading"; job: Job; fileCount: number }
   | { type: "files_uploaded"; job: Job; files: FileAttachment[] }
   | { type: "response_submitted"; job: Job; responseId: string; hasFiles?: boolean }
+  | { type: "response_accepted"; message: string; metadata: { jobId: string; responseId: string } }
+  | { type: "response_rejected"; message: string; metadata: { jobId: string; responseId: string } }
   | { type: "error"; message: string; error?: Error }
   | { type: "shutdown" };
 
