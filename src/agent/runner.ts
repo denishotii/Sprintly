@@ -127,7 +127,7 @@ export class AgentRunner extends EventEmitter implements TypedEventEmitter {
       return;
     }
 
-    const agentId = configStore.get("agentId");
+    const agentId = configStore.get("agentId") || process.env.AGENT_ID;
     if (!agentId) {
       logger.warn("Agent ID not found — cannot subscribe to WebSocket channel");
       return;
