@@ -60,6 +60,17 @@ export interface PlanResult {
 // Builder
 // ─────────────────────────────────────────
 
+/** Metrics tracking from the Builder step — used to identify performance bottlenecks. */
+export interface BuilderMetrics {
+  /** Whether the builder had to retry (initial tool call returned 0 files). */
+  retriedForZeroFiles: boolean;
+  /** Whether the fallback markdown parser was used. */
+  usedMarkdownFallback: boolean;
+  /** Number of files extracted from tool calls vs fallback. */
+  filesFromToolCall: number;
+  filesFromFallback: number;
+}
+
 /** The result of the Builder step — generated files ready to zip. */
 export interface BuildResult {
   /** Files produced by the Builder (path + content). */
@@ -68,6 +79,8 @@ export interface BuildResult {
   textResponse?: string;
   /** Token usage for this step. */
   usage?: StepUsage;
+  /** Metrics and diagnostics from this build. */
+  metrics?: BuilderMetrics;
 }
 
 // ─────────────────────────────────────────

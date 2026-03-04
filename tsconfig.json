@@ -18,7 +18,12 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
-    }
+    },
+    // Performance optimizations: skip type checking of incremental builds in development
+    "incremental": true,
+    "tsBuildInfoFile": ".tsbuildinfo",
+    // Faster type checking: don't emit declarations unless explicitly requested
+    "isolatedDeclarations": false
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "tests"]

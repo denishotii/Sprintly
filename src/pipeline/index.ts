@@ -139,6 +139,22 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       `Pipeline: builder done in ${builderMs}ms — ${buildResult.files.length} file(s) generated`
     );
 
+    // Log builder diagnostics if metrics available
+    if (buildResult.metrics) {
+      const { retriedForZeroFiles, usedMarkdownFallback, filesFromToolCall, filesFromFallback } =
+        buildResult.metrics;
+      if (retriedForZeroFiles || usedMarkdownFallback) {
+        logger.warn(
+          `Pipeline: builder recovery needed — retriedForZeroFiles=${retriedForZeroFiles}, ` +
+          `usedMarkdownFallback=${usedMarkdownFallback}, filesFromTool=${filesFromToolCall}, filesFromMarkdown=${filesFromFallback}`
+        );
+      } else {
+        logger.debug(
+          `Pipeline: builder succeeded on first try — toolCallsSucceeded=true, files=${filesFromToolCall}`
+        );
+      }
+    }
+
     if (buildResult.files.length === 0) {
       // Builder produced nothing — return text response as fallback
       logger.warn("Pipeline: builder produced no files, falling back to text response");

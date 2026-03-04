@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "tsup",
+    "build:prod": "NODE_ENV=production CI=true tsup",
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "start:built": "node dist/index.js",

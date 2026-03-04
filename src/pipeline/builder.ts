@@ -15,7 +15,7 @@ import {
 import { getFullDesignSystem } from "../templates/index.js";
 import { logger } from "../utils/logger.js";
 import { getConfig } from "../config/index.js";
-import type { PlanResult, BuildResult, StepUsage, ProjectMode } from "./types.js";
+import type { PlanResult, BuildResult, StepUsage, ProjectMode, BuilderMetrics } from "./types.js";
 import type { ProjectFile } from "../tools/projectBuilder.js";
 
 // Disable extended thinking for the builder — Claude 4 models enable thinking by default
@@ -24,6 +24,9 @@ import type { ProjectFile } from "../tools/projectBuilder.js";
 const BUILDER_PROVIDER_OPTIONS = {
   anthropic: { thinking: { type: "disabled" } },
 } as Record<string, Record<string, unknown>>;
+
+// Cache design system CSS at module load to avoid re-generating on every build
+const CACHED_DESIGN_SYSTEM = getFullDesignSystem();
 
 /** Modes that receive design system CSS injection (base + components). React handles its own styling. */
 const MODES_WITH_DESIGN_SYSTEM_CSS: ProjectMode[] = ["website", "web-app"];
@@ -370,15 +373,13 @@ function injectDesignSystemCssIfNeeded(files: ProjectFile[], mode: ProjectMode):
   const normalized = (p: string) => p.replace(/\\/g, "/").toLowerCase();
   const target = files.find((f) => normalized(f.path) === normalized(cssPath));
 
-  const designSystem = getFullDesignSystem();
-
   if (target) {
-    target.content = `${designSystem}\n\n/* ── Project styles ───────────────────────────────────────── */\n${target.content}`;
+    target.content = `${CACHED_DESIGN_SYSTEM}\n\n/* ── Project styles ───────────────────────────────────────── */\n${target.content}`;
     logger.debug("Builder: prepended design system CSS to styles/main.css");
   } else {
     files.push({
       path: cssPath,
-      content: `${designSystem}\n\n/* Project overrides */\n`,
+      content: `${CACHED_DESIGN_SYSTEM}\n\n/* Project overrides */\n`,
     });
     logger.debug("Builder: added styles/main.css with design system (file was missing)");
   }
@@ -418,6 +419,12 @@ export async function runBuilder(
             totalTokens: result.usage.totalTokens,
           }
         : undefined,
+      metrics: {
+        retriedForZeroFiles: false,
+        usedMarkdownFallback: false,
+        filesFromToolCall: 0,
+        filesFromFallback: 0,
+      },
     };
   }
 
@@ -449,6 +456,12 @@ export async function runBuilder(
             totalTokens: result.usage.totalTokens,
           }
         : undefined,
+      metrics: {
+        retriedForZeroFiles: false,
+        usedMarkdownFallback: false,
+        filesFromToolCall: 0,
+        filesFromFallback: 1,
+      },
     };
   }
 
@@ -476,11 +489,20 @@ export async function runBuilder(
   let cumulativeUsage = result.usage;
   const firstResponseText = result.text ?? "";
 
+  // Track metrics for diagnostics
+  const metrics: BuilderMetrics = {
+    retriedForZeroFiles: false,
+    usedMarkdownFallback: false,
+    filesFromToolCall: 0,
+    filesFromFallback: 0,
+  };
+
   // Extract files from tool calls (mode-agnostic)
   let files: ProjectFile[] = [];
 
   if (result.toolCalls && result.toolCalls.length > 0) {
     files = extractFilesFromToolCalls(result.toolCalls);
+    metrics.filesFromToolCall = files.length;
     const names = result.toolCalls.map((tc) => tc.name).join(", ");
     logger.info(`Builder: ${result.toolCalls.length} tool call(s) [${names}] → ${files.length} file(s) extracted`);
     for (const tc of result.toolCalls) {
@@ -503,6 +525,7 @@ export async function runBuilder(
   // This avoids the tool-call JSON serialisation bug where some models pass `files` as a
   // Python-syntax string rather than a proper JSON array, causing 0 files to be extracted.
   if (files.length === 0) {
+    metrics.retriedForZeroFiles = true;
     const noToolsNudge =
       "\n\n[Tool call produced no files. Output each file as a complete markdown code block instead — do NOT call any tools. Example format:\n\n```python\n# main.py\n(full file content here)\n```\n\nOutput ALL project files now as code blocks:]";
     logger.info("Builder: 0 files extracted — retrying without tools (code block fallback)");
@@ -528,6 +551,8 @@ export async function runBuilder(
       const retryFiles = parseCodeBlocksFromText(retryResult.text, plan);
       if (retryFiles.length > 0) {
         files = retryFiles;
+        metrics.usedMarkdownFallback = true;
+        metrics.filesFromFallback = retryFiles.length;
         logger.info(`Builder: retry (no-tools) succeeded — ${files.length} file(s) from code blocks`);
       } else {
         logger.warn("Builder: retry (no-tools) returned text but no code blocks found");
@@ -543,6 +568,8 @@ export async function runBuilder(
       const fallbackFiles = parseCodeBlocksFromText(trimmed, plan);
       if (fallbackFiles.length > 0) {
         files = fallbackFiles;
+        metrics.usedMarkdownFallback = true;
+        metrics.filesFromFallback = fallbackFiles.length;
         logger.info(
           `Builder: recovered ${files.length} file(s) from code blocks in text response (fallback for mystery prompts)`
         );
@@ -609,5 +636,6 @@ export async function runBuilder(
     files,
     textResponse: result.text || undefined,
     usage,
+    metrics,
   };
 }
