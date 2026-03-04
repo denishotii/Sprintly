@@ -844,39 +844,65 @@ export class AgentRunner extends EventEmitter implements TypedEventEmitter {
         });
 
         try {
-          this.emitEvent({ type: "files_uploading", job, fileCount: 1 });
-          const uploadedFile = await this.client.uploadFile(result.zipPath);
-          this.emitEvent({ type: "files_uploaded", job, files: [uploadedFile] });
-
-          let submitResult;
-          if (useV2Submit) {
-            submitResult = await this.client.submitResponseV2(
-              job.id,
-              result.textResponse,
-              "FILE",
-              [uploadedFile]
-            );
-          } else {
-            submitResult = await this.client.submitResponseWithFiles(job.id, {
-              content: result.textResponse,
-              responseType: "FILE",
-              files: [uploadedFile],
-            });
+          // Retry upload up to 3 times with increasing delays (5s, 10s, 20s)
+          let uploadedFile: FileAttachment | undefined;
+          const uploadRetries = 3;
+          for (let attempt = 1; attempt <= uploadRetries; attempt++) {
+            try {
+              this.emitEvent({ type: "files_uploading", job, fileCount: 1 });
+              uploadedFile = await this.client.uploadFile(result.zipPath);
+              this.emitEvent({ type: "files_uploaded", job, files: [uploadedFile] });
+              break; // success
+            } catch (uploadAttemptError) {
+              const uploadAttemptMsg = uploadAttemptError instanceof Error ? uploadAttemptError.message : String(uploadAttemptError);
+              if (uploadAttemptMsg.includes("already submitted")) {
+                logger.debug(`Job ${job.id} was already submitted (detected during file upload), skipping`);
+                uploadedFile = undefined;
+                break;
+              }
+              if (attempt < uploadRetries) {
+                const delayMs = 5000 * attempt; // 5s, 10s
+                logger.warn(`Upload attempt ${attempt}/${uploadRetries} failed for job ${job.id}: ${uploadAttemptMsg}. Retrying in ${delayMs / 1000}s...`);
+                await new Promise((r) => setTimeout(r, delayMs));
+              } else {
+                throw uploadAttemptError; // exhausted retries — fall through to text-only
+              }
+            }
           }
 
-          this.emitEvent({
-            type: "response_submitted",
-            job,
-            responseId: submitResult.response.id,
-            hasFiles: true,
-          });
-          this.recordSubmittedResponse(job.id, submitResult.response.id);
+          if (!uploadedFile) {
+            // Already-submitted case — nothing more to do
+          } else {
+            let submitResult;
+            if (useV2Submit) {
+              submitResult = await this.client.submitResponseV2(
+                job.id,
+                result.textResponse,
+                "FILE",
+                [uploadedFile]
+              );
+            } else {
+              submitResult = await this.client.submitResponseWithFiles(job.id, {
+                content: result.textResponse,
+                responseType: "FILE",
+                files: [uploadedFile],
+              });
+            }
+
+            this.emitEvent({
+              type: "response_submitted",
+              job,
+              responseId: submitResult.response.id,
+              hasFiles: true,
+            });
+            this.recordSubmittedResponse(job.id, submitResult.response.id);
+          }
         } catch (uploadError) {
           const uploadErrorMsg = uploadError instanceof Error ? uploadError.message : String(uploadError);
           if (uploadErrorMsg.includes("already submitted")) {
             logger.debug(`Job ${job.id} was already submitted (detected during file upload), skipping`);
           } else {
-            logger.error("Failed to upload project files, submitting text-only:", uploadError);
+            logger.warn(`All upload attempts failed for job ${job.id}, submitting text-only: ${uploadErrorMsg}`);
             const submitResult = useV2Submit
               ? await this.client.submitResponseV2(job.id, result.textResponse)
               : await this.client.submitResponse(job.id, result.textResponse);

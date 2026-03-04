@@ -276,8 +276,10 @@ export class SeedstrClient {
     // Upload to the v1/upload endpoint (server-side upload API)
     const uploadUrl = `${config.seedstrApiUrl}/upload`;
 
+    const uploadAbort = AbortSignal.timeout(60_000); // 60s upload timeout
     const response = await fetch(uploadUrl, {
       method: "POST",
+      signal: uploadAbort,
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",
