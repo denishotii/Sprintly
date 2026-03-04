@@ -5,6 +5,7 @@ import { basename } from "path";
 import type {
   AgentInfo,
   Job,
+  JobResponse,
   JobsListResponse,
   RegisterResponse,
   SubmitResponseResult,
