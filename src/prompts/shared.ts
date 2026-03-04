@@ -181,6 +181,8 @@ export function getTechStackRules(mode: ProjectMode): string {
       return NODE_TECH_STACK_RULES;
     case "text":
       return "## Tech Stack\nNo code project — text response only.";
+    case "document":
+      return "## Tech Stack\nNo code project — markdown document delivery only.";
     default:
       return assertNever(mode);
   }
@@ -190,7 +192,7 @@ export function getTechStackRules(mode: ProjectMode): string {
  * Returns required output structure (file layout) for the given project mode.
  * Used by the Builder system prompt to describe expected files and folders.
  *
- * @param mode — one of website, web-app, react-app, python, node, text
+ * @param mode — one of website, web-app, react-app, python, node, text, document
  * @returns Mode-specific output structure string
  */
 export function getOutputStructure(mode: ProjectMode): string {
@@ -206,6 +208,8 @@ export function getOutputStructure(mode: ProjectMode): string {
       return NODE_OUTPUT_STRUCTURE;
     case "text":
       return "## Output\nNo files — deliver the response as plain text only.";
+    case "document":
+      return "## Output\nDeliver report.md with full markdown content + AI_AGENT_INSTRUCTIONS.md.";
     default:
       return assertNever(mode);
   }

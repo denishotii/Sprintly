@@ -8,7 +8,7 @@ export {
   getBuilderPromptForMode,
 } from "./builder.js";
 export { VERIFIER_SYSTEM_PROMPT, getVerifierPrompt } from "./verifier.js";
-export { TEXT_RESPONSE_SYSTEM_PROMPT } from "./textResponse.js";
+export { TEXT_RESPONSE_SYSTEM_PROMPT, DOCUMENT_WRITER_SYSTEM_PROMPT } from "./textResponse.js";
 export {
   TECH_STACK_RULES,
   DESIGN_DEFAULTS,

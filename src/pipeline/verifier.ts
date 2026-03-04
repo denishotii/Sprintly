@@ -300,10 +300,12 @@ export function validateFiles(files: ProjectFile[], mode: ProjectMode = "website
       break;
     case "text":
       break; // Text mode produces no files — nothing to validate
+    case "document":
+      break; // Document mode delivers report.md — no structural checks needed
   }
 
-  // Common checks (README, empty files) applied to all file-producing modes
-  if (mode !== "text") {
+  // Common checks (README, empty files) applied to all file-producing code modes
+  if (mode !== "text" && mode !== "document") {
     issues.push(...validateCommon(files));
   }
 

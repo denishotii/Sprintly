@@ -13,7 +13,7 @@ export interface PlannerResult {
   usage?: StepUsage;
 }
 
-const VALID_MODES: ProjectMode[] = ["website", "web-app", "react-app", "python", "node", "text"];
+const VALID_MODES: ProjectMode[] = ["website", "web-app", "react-app", "python", "node", "text", "document"];
 
 // ─────────────────────────────────────────
 // Prompt-based mode detection (for fallback)

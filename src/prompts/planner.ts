@@ -19,7 +19,7 @@ You can optionally include a brief <thinking> block before the JSON to explain y
 
 \`\`\`json
 {
-  "mode": "website" | "web-app" | "react-app" | "python" | "node" | "text",
+  "mode": "website" | "web-app" | "react-app" | "python" | "node" | "text" | "document",
   "taskSummary": "One sentence describing what needs to be built",
   "techStack": {
     "styling": "tailwind" | "vanilla-css" | "both",
@@ -61,17 +61,49 @@ You can optionally include a brief <thinking> block before the JSON to explain y
 ### text
 - files[] MUST be empty []
 
+### document
+- files[] MUST be empty []
+- Use for knowledge-delivery tasks: technical guides, CVE/vulnerability references, security strategies, architecture documentation, best-practice reports, checklists, analysis, and any task where the deliverable is structured written content rather than runnable software
+- The Builder will generate report.md with the full content + AI_AGENT_INSTRUCTIONS.md automatically
+- Do NOT use for interactive apps even if they display information — use web-app for anything with buttons, forms, dashboards, timers, or user interaction
+
 ## Mode Decision Guide
+
+### Runnable software (web-app / website / python / node)
+Use these modes ONLY when the deliverable is software that runs, renders, or executes:
 - "Build a landing page..." → website
 - "Create a task management app..." → web-app
 - "Create a React todo app..." → react-app
 - "Build a quiz app..." → web-app (no framework = web-app)
+- "Build a [timer / board / tracker / calculator / dashboard / game]..." → web-app
 - "Generate a Python script that..." → python
 - "Build a Flask web app..." → python
 - "Build a Node.js CLI that..." → node
 - "Build an Express API..." → node
+
+### Document (structured written content — NOT runnable software)
+Use "document" when the deliverable is knowledge, reference material, or a written report — even if the prompt uses verbs like "build", "create", or "design":
+- "[Topic]: [list of subtopics / things to cover]..." → document (informational multi-topic format)
+- "Top N [things] with [scores / details]..." → document
+- "Write/Create/Generate a guide/report/strategy/analysis/overview/checklist/framework..." → document
+- "Design/Build a [security strategy / architecture / hardening guide / framework]..." → document (if no interactive UI is implied)
+- "Best practices for..." → document
+- "Explain/Describe/Outline/Compare [technical concept]..." → document
+- "[Security topic] covering [CVEs / vulnerabilities / hardening steps]..." → document
+- "What are the top [N] [threats / tools / techniques]..." → document
+
+### Key rule: "build" ≠ always web-app
+Ask: is the output something a user RUNS in a browser/terminal, or something they READ?
+- "Build a Pomodoro timer" → user runs it → web-app ✅
+- "Build a Zero Trust security architecture" → user reads it → document ✅
+- "Build a Kubernetes hardening strategy" → user reads it → document ✅
+- "Build a CVE reference for container escapes" → user reads it → document ✅
+
+### Text (very short social/writing tasks only)
 - "Write me a haiku..." → text
 - "Summarize this article..." → text
+- "Write a tweet thread about..." → text
+- Short copywriting tasks with no structured sections → text
 
 ${OUTPUT_STRUCTURE}
 
@@ -164,5 +196,25 @@ Example 6 — "Write me a haiku about autumn"
   "files": [],
   "designNotes": "",
   "complexityEstimate": "low"
+}
+
+Example 7 — "Container Security: Top 10 container escape CVEs from 2024-2025 with CVSS scores and remediation steps"
+{
+  "mode": "document",
+  "taskSummary": "Top 10 container escape CVEs 2024–2025 with CVSS scores, attack vectors, and remediation guidance",
+  "techStack": { "styling": "vanilla-css", "interactivity": "none", "dataStorage": "none", "runtime": "browser", "charts": false, "icons": false },
+  "files": [],
+  "designNotes": "",
+  "complexityEstimate": "high"
+}
+
+Example 8 — "Design a production-grade Kubernetes security hardening strategy covering RBAC, network policies, pod security, secrets management, and image scanning"
+{
+  "mode": "document",
+  "taskSummary": "Production-grade Kubernetes security hardening strategy: RBAC, network policies, pod security, secrets management, and image scanning",
+  "techStack": { "styling": "vanilla-css", "interactivity": "none", "dataStorage": "none", "runtime": "browser", "charts": false, "icons": false },
+  "files": [],
+  "designNotes": "",
+  "complexityEstimate": "high"
 }
 `.trim();
