@@ -243,13 +243,22 @@ function validateNodeFiles(files: ProjectFile[], pathSet: Set<string>): string[]
 
 function validateCommon(files: ProjectFile[]): string[] {
   const issues: string[] = [];
+  const normPath = (p: string) => p.replace(/\\/g, "/").toLowerCase();
 
   // README must exist and have content
-  const readme = files.find((f) => f.path.toLowerCase().replace(/\\/g, "/") === "readme.md");
+  const readme = files.find((f) => normPath(f.path) === "readme.md");
   if (!readme) {
     issues.push("README.md is missing");
   } else if (readme.content.trim().length < 50) {
     issues.push("README.md exists but has very little content");
+  }
+
+  // AI_AGENT_INSTRUCTIONS.md must exist — required by grading agent
+  const aiInstructions = files.find((f) => normPath(f.path) === "ai_agent_instructions.md");
+  if (!aiInstructions) {
+    issues.push("AI_AGENT_INSTRUCTIONS.md is missing — required for grading agent");
+  } else if (aiInstructions.content.trim().length < 80) {
+    issues.push("AI_AGENT_INSTRUCTIONS.md has insufficient content — must include setup and run instructions");
   }
 
   // No completely empty files (skip binary/asset paths)
@@ -398,7 +407,10 @@ export async function runVerifier(
       tools: false, // Verifier outputs JSON directly
       maxTokens: 8000,
       temperature: 0.1, // Very low — we want deterministic fixes
+      providerOptions: { anthropic: { thinking: { type: "disabled" } } } as Record<string, Record<string, unknown>>,
     });
+
+    const verifierText = result.text?.trim() || result.reasoning || "";
 
     usage = result.usage
       ? {
@@ -410,7 +422,7 @@ export async function runVerifier(
 
     let verifierOutput: VerifierOutput;
     try {
-      verifierOutput = parseVerifierResponse(result.text);
+      verifierOutput = parseVerifierResponse(verifierText);
     } catch (parseErr) {
       logger.warn(`Verifier: failed to parse LLM JSON (${(parseErr as Error).message}) — keeping original files`);
       return { files, issuesFound: validation.issues, llmVerifierRan: true, usage };

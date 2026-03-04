@@ -36,6 +36,7 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): LLMPro
         tools,
         model: modelOverride,
         toolChoice,
+        providerOptions,
       } = params;
 
       const effectiveModel = modelOverride ?? modelId;
@@ -50,7 +51,7 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): LLMPro
               : undefined;
 
       logger.debug(
-        `Anthropic generate: model=${effectiveModel}, hasTools=${hasTools}, toolChoice=${resolvedToolChoice ? (typeof resolvedToolChoice === "string" ? resolvedToolChoice : resolvedToolChoice.toolName) : "auto"}`
+        `Anthropic generate: model=${effectiveModel}, hasTools=${hasTools}, toolChoice=${resolvedToolChoice ? (typeof resolvedToolChoice === "string" ? resolvedToolChoice : resolvedToolChoice.toolName) : "auto"}, providerOptions=${providerOptions ? JSON.stringify(providerOptions) : "none"}`
       );
 
       const result = await generateText({
@@ -61,6 +62,7 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): LLMPro
         temperature,
         tools: hasTools ? tools : undefined,
         toolChoice: hasTools && resolvedToolChoice ? resolvedToolChoice : undefined,
+        providerOptions: providerOptions as Parameters<typeof generateText>[0]["providerOptions"],
         onStepFinish: (step) => {
           logger.debug(
             `Anthropic step finished - finishReason: ${step.finishReason}, toolCalls: ${step.toolCalls?.length ?? 0}`
@@ -68,7 +70,32 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): LLMPro
         },
       });
 
-      return normalizeGenerateResult(result as unknown as GenerateTextResult);
+      // AI SDK 6 may expose steps/toolCalls/toolResults as PromiseLike; resolve before normalizing
+      const raw = result as unknown as GenerateTextResult & {
+        steps?: PromiseLike<GenerateTextResult["steps"]> | GenerateTextResult["steps"];
+        toolCalls?: PromiseLike<GenerateTextResult["toolCalls"]> | GenerateTextResult["toolCalls"];
+        toolResults?: PromiseLike<GenerateTextResult["toolResults"]> | GenerateTextResult["toolResults"];
+        reasoning?: PromiseLike<string> | string;
+      };
+      const [steps, topLevelToolCalls, topLevelToolResults, reasoning] = await Promise.all([
+        Promise.resolve(raw.steps),
+        Promise.resolve(raw.toolCalls),
+        Promise.resolve(raw.toolResults),
+        Promise.resolve(raw.reasoning),
+      ]);
+
+      logger.debug(
+        `Anthropic result: text=${raw.text?.length ?? 0}chars, reasoning=${reasoning?.length ?? 0}chars, steps=${steps?.length ?? 0}`
+      );
+
+      const resolvedResult: GenerateTextResult = {
+        ...raw,
+        reasoning: reasoning ?? undefined,
+        steps: steps ?? undefined,
+        toolCalls: topLevelToolCalls ?? undefined,
+        toolResults: topLevelToolResults ?? undefined,
+      };
+      return normalizeGenerateResult(resolvedResult);
     },
   };
 

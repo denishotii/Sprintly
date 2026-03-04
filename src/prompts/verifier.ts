@@ -45,6 +45,7 @@ You are a senior front-end engineer performing a final code review before submis
    - No broken <link href="...">, <script src="...">, or <img src="..."> references to local files that don't exist in the project
    - No empty files
    - README.md has real, useful content (not just a title)
+   - AI_AGENT_INSTRUCTIONS.md exists and contains run instructions and a short description of what was implemented
    - All interactive elements referenced in JS actually exist in HTML
 3. If you find issues, fix them and return the corrected file contents in fixedFiles.
 4. If everything looks good, return status "ok" and empty fixedFiles.
@@ -69,6 +70,7 @@ You are a senior React developer performing a final code review before submissio
    - <div id="root"> appears before the JSX script tag
    - No empty files
    - README.md has real content and says "open index.html in any browser"
+   - AI_AGENT_INSTRUCTIONS.md exists and contains run instructions and a short description of what was implemented
 3. If you find issues, fix them.
 4. If everything looks good, return status "ok".
 
@@ -91,6 +93,7 @@ You are a senior Python developer performing a final code review before submissi
    - All imports at the top of each file can be resolved: standard library or listed in requirements.txt
    - No references to undefined variables or functions within the same file
    - README.md exists with setup instructions (pip install -r requirements.txt) and how to run
+   - AI_AGENT_INSTRUCTIONS.md exists with setup/run instructions (venv, pip install, run command) and a short description of what was implemented
    - No empty files
 3. If you find issues, fix them. For requirements.txt, add any missing packages. For syntax issues, fix the code.
 4. If everything looks good, return status "ok".
@@ -115,6 +118,7 @@ You are a senior Node.js developer performing a final code review before submiss
    - No require() calls when using ES modules ("type": "module")
    - No unhandled promise patterns: top-level await is fine, but async functions that can reject should have try/catch
    - README.md exists with setup (npm install) and run (npm start) instructions
+   - AI_AGENT_INSTRUCTIONS.md exists with setup/run instructions and a short description of what was implemented
    - No empty files
 3. If you find issues, fix them. Add missing dependencies to package.json. Fix syntax issues in JS files.
 4. If everything looks good, return status "ok".

@@ -39,6 +39,8 @@ function getRetryConfig() {
 
 export interface LLMResponse {
   text: string;
+  /** Extended-thinking / reasoning content (Claude 4+ models). */
+  reasoning?: string;
   toolCalls?: {
     name: string;
     args: Record<string, unknown>;
@@ -143,6 +145,8 @@ export interface GenerateOptions {
   toolsFilter?: "all" | "builder";
   /** Execution context ID for tracking builders across concurrent jobs */
   executionId?: string;
+  /** Provider-specific options (e.g. Anthropic thinking config). Passed through to the AI SDK. */
+  providerOptions?: Record<string, Record<string, unknown>>;
 }
 
 /** Pipeline step names; each can use its own model (see config plannerModel, builderModel, verifierModel, textResponseModel). */
@@ -330,16 +334,28 @@ export class LLMClient {
 
       // Batch project creation — preferred for pipeline builder step (one call, all files)
       tools.create_project = tool({
-        description: `Create a complete project in one call: pass projectName and an array of { path, content } for every file. Use this when building a full web project (e.g. from a plan). All files are written and zipped in one step. Include index.html, styles/main.css, scripts/app.js, README.md as needed. Do NOT use for text-only requests.`,
+        description: `Create a complete project in one call: pass projectName and a NON-EMPTY array of { path, content } for every file. You MUST include the actual file contents in the 'content' field — do not pass an empty files array. All files are written and zipped in one step. Include the entry point (index.html / main.py / index.js), README.md, and all other files from the plan. Do not include AI_AGENT_INSTRUCTIONS.md — it is auto-generated. Do NOT use for text-only requests.`,
         inputSchema: zodSchema(z.object({
           projectName: z.string().describe("Short slug for the project (e.g. 'landing-page', 'todo-app')"),
           files: z.array(z.object({
             path: z.string().describe("Relative path, e.g. 'index.html', 'styles/main.css'"),
-            content: z.string().describe("Full file content"),
-          })).describe("All project files; must include index.html and README.md (or README is auto-added)"),
+            content: z.string().min(1, "content must not be empty — write the full file content here"),
+          }))
+            .min(1, "files must not be empty — include every project file with its full content")
+            .describe("All project files with complete content. REQUIRED: must have at least one file."),
         })),
         execute: async ({ projectName, files }: { projectName: string; files: ProjectFile[] }) => {
           logger.tool("create_project", "start", `${projectName} (${files?.length ?? 0} files)`);
+
+          // Belt-and-suspenders: guard against an empty array slipping past Zod
+          if (!files || files.length === 0) {
+            const msg =
+              "create_project was called with an empty files array. You must include all project files " +
+              "with their complete content in the 'files' array. Do not pass files: [].";
+            logger.warn(`create_project: ${msg}`);
+            throw new Error(msg);
+          }
+
           try {
             const builder = getBuilderForExecution(executionId || "default");
             builder.createBatch(projectName, files);
@@ -476,6 +492,7 @@ export class LLMClient {
       temperature: options.temperature ?? this.temperature,
       tools,
       toolChoice,
+      providerOptions: options.providerOptions,
     });
 
     // Propagate executionId for next pipeline step
@@ -592,9 +609,10 @@ export class LLMClient {
       temperature: number;
       tools?: Record<string, Tool>;
       toolChoice?: "auto" | "required" | "none" | { type: "tool"; toolName: string };
+      providerOptions?: Record<string, Record<string, unknown>>;
     }
   ): Promise<LLMResponse> {
-    const { prompt, systemPrompt, maxTokens, temperature, tools, toolChoice } = params;
+    const { prompt, systemPrompt, maxTokens, temperature, tools, toolChoice, providerOptions } = params;
 
     const result = await provider.generate({
       prompt,
@@ -604,6 +622,7 @@ export class LLMClient {
       tools,
       toolChoice,
       model: modelOverride,
+      providerOptions,
     });
 
     const toolCalls = result.toolCalls;
@@ -659,6 +678,7 @@ export class LLMClient {
 
     return {
       text: result.text,
+      reasoning: result.reasoning,
       toolCalls: (toolCalls?.length ?? 0) > 0 ? toolCalls : undefined,
       usage: result.usage,
       finishReason: result.finishReason,

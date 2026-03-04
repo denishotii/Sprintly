@@ -20,6 +20,8 @@ export interface ProviderToolCall {
 /** Normalized result from a provider's generate call */
 export interface ProviderGenerateResult {
   text: string;
+  /** Extended-thinking / reasoning content (Claude 4+ models). */
+  reasoning?: string;
   toolCalls?: ProviderToolCall[];
   usage?: ProviderUsage;
   /** Why the generation stopped; 'length' means output was truncated (increase maxTokens). */
@@ -37,6 +39,8 @@ export interface ProviderGenerateParams {
   model?: string;
   /** Tool choice: 'auto' | 'required' | 'none' or { type: 'tool', toolName: string }. Use 'required' for builder step so the model must call create_project. */
   toolChoice?: "auto" | "required" | "none" | { type: "tool"; toolName: string };
+  /** Provider-specific options (e.g. Anthropic thinking config). Passed through to the AI SDK's generateText. */
+  providerOptions?: Record<string, Record<string, unknown>>;
 }
 
 /**

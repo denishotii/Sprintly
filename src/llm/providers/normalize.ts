@@ -24,6 +24,8 @@ interface GenerateTextStep {
 /** Full result from AI SDK generateText. SDK 6 also exposes toolCalls/toolResults at top level (last step). */
 export interface GenerateTextResult {
   text: string;
+  /** Extended-thinking / reasoning content (Claude 4+ via @ai-sdk/anthropic). */
+  reasoning?: string;
   finishReason?: string;
   steps?: GenerateTextStep[];
   /** Top-level tool calls (AI SDK 6 — from last step when steps exist). */
@@ -79,11 +81,20 @@ export function normalizeGenerateResult(result: GenerateTextResult): ProviderGen
 
   // Collect all tool results by id from any step (SDK may put results in same or next step)
   const allResultsById = new Map<string, unknown>();
-  if (result.steps) {
-    for (const step of result.steps) {
-      for (const tr of step.toolResults ?? []) {
-        const out = tr.result ?? tr.output;
-        if (tr.toolCallId && out !== undefined) allResultsById.set(tr.toolCallId, out);
+  const stepsForResults = result.steps && Array.isArray(result.steps) ? result.steps : [];
+  for (const step of stepsForResults) {
+    for (const tr of step.toolResults ?? []) {
+      const out = tr.result ?? tr.output;
+      if (tr.toolCallId && out !== undefined) allResultsById.set(tr.toolCallId, out);
+    }
+    // AI SDK 6: tool results may be in step.content as type === 'tool-result' parts
+    const content = (step as { content?: Array<{ type: string; toolCallId?: string; output?: unknown; result?: unknown }> }).content;
+    if (Array.isArray(content)) {
+      for (const part of content) {
+        if (part.type === "tool-result" && part.toolCallId) {
+          const out = part.output ?? part.result;
+          if (out !== undefined) allResultsById.set(part.toolCallId, out);
+        }
       }
     }
   }
@@ -93,23 +104,26 @@ export function normalizeGenerateResult(result: GenerateTextResult): ProviderGen
   }
 
   // 1. From steps (all steps so we get create_project from step 0 even if last step has no tool calls)
-  if (result.steps) {
-    for (const step of result.steps) {
+  const stepsArray = result.steps && Array.isArray(result.steps) ? result.steps : undefined;
+  if (stepsArray) {
+    for (const step of stepsArray) {
       const stepCalls = step.toolCalls ?? [];
       for (const tc of stepCalls) {
         const toolResult = allResultsById.get(tc.toolCallId);
         pushToolCall(tc, toolResult);
       }
-      // Fallback: AI SDK 6 may expose content array with type === 'tool-call' parts
-      if (stepCalls.length === 0 && (step as { content?: Array<{ type: string; toolName?: string; toolCallId?: string; input?: unknown }> }).content) {
+      // Fallback: AI SDK 6 may put tool calls only in step.content as type === 'tool-call' parts
+      if (stepCalls.length === 0 && (step as { content?: unknown }).content) {
         const content = (step as { content: Array<{ type: string; toolName?: string; toolCallId?: string; input?: unknown }> }).content;
-        for (const part of content) {
-          if (part.type === "tool-call" && part.toolName && part.toolCallId) {
-            const toolResult = allResultsById.get(part.toolCallId);
-            pushToolCall(
-              { toolName: part.toolName, toolCallId: part.toolCallId, input: part.input },
-              toolResult
-            );
+        if (Array.isArray(content)) {
+          for (const part of content) {
+            if (part.type === "tool-call" && part.toolName && part.toolCallId) {
+              const toolResult = allResultsById.get(part.toolCallId);
+              pushToolCall(
+                { toolName: part.toolName, toolCallId: part.toolCallId, input: part.input },
+                toolResult
+              );
+            }
           }
         }
       }
@@ -126,10 +140,11 @@ export function normalizeGenerateResult(result: GenerateTextResult): ProviderGen
   }
 
   let text = result.text;
-  if (!text && toolCalls.length > 0 && result.steps?.length) {
-    for (let i = result.steps.length - 1; i >= 0; i--) {
-      if (result.steps[i].text) {
-        text = result.steps[i].text ?? "";
+  // Fallback: check steps for text (AI SDK 6 may place text only in steps)
+  if (!text && stepsArray?.length) {
+    for (let i = stepsArray.length - 1; i >= 0; i--) {
+      if (stepsArray[i].text) {
+        text = stepsArray[i].text ?? "";
         break;
       }
     }
@@ -153,12 +168,13 @@ export function normalizeGenerateResult(result: GenerateTextResult): ProviderGen
 
   const finishReason =
     result.finishReason ??
-    (result.steps?.length
-      ? (result.steps[result.steps.length - 1] as { finishReason?: string } | undefined)?.finishReason
+    (stepsArray?.length
+      ? (stepsArray[stepsArray.length - 1] as { finishReason?: string } | undefined)?.finishReason
       : undefined);
 
   return {
     text: text ?? "",
+    reasoning: result.reasoning,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     usage,
     finishReason,
