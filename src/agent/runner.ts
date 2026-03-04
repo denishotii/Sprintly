@@ -872,17 +872,22 @@ export class AgentRunner extends EventEmitter implements TypedEventEmitter {
           });
           this.recordSubmittedResponse(job.id, submitResult.response.id);
         } catch (uploadError) {
-          logger.error("Failed to upload project files, submitting text-only:", uploadError);
-          const submitResult = useV2Submit
-            ? await this.client.submitResponseV2(job.id, result.textResponse)
-            : await this.client.submitResponse(job.id, result.textResponse);
-          this.emitEvent({
-            type: "response_submitted",
-            job,
-            responseId: submitResult.response.id,
-            hasFiles: false,
-          });
-          this.recordSubmittedResponse(job.id, submitResult.response.id);
+          const uploadErrorMsg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          if (uploadErrorMsg.includes("already submitted")) {
+            logger.debug(`Job ${job.id} was already submitted (detected during file upload), skipping`);
+          } else {
+            logger.error("Failed to upload project files, submitting text-only:", uploadError);
+            const submitResult = useV2Submit
+              ? await this.client.submitResponseV2(job.id, result.textResponse)
+              : await this.client.submitResponse(job.id, result.textResponse);
+            this.emitEvent({
+              type: "response_submitted",
+              job,
+              responseId: submitResult.response.id,
+              hasFiles: false,
+            });
+            this.recordSubmittedResponse(job.id, submitResult.response.id);
+          }
         } finally {
           cleanupProject(result.projectDir, result.zipPath);
         }

@@ -60,8 +60,13 @@ export class SeedstrClient {
 
     if (!response.ok) {
       const error = data as ApiError;
-      logger.error(`API Error: ${error.message}`);
-      throw new Error(error.message || `API request failed: ${response.status}`);
+      const msg = error.message || `API request failed: ${response.status}`;
+      if (msg.includes("already submitted")) {
+        logger.debug(`API: ${msg}`);
+      } else {
+        logger.error(`API Error: ${msg}`);
+      }
+      throw new Error(msg);
     }
 
     return data as T;
