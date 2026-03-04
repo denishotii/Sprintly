@@ -71,11 +71,12 @@ export class SeedstrClient {
    */
   async register(
     walletAddress: string,
+    walletType: "ETH" | "SOL" = "ETH",
     ownerUrl?: string
   ): Promise<RegisterResponse> {
     return this.request<RegisterResponse>("/register", {
       method: "POST",
-      body: JSON.stringify({ walletAddress, ownerUrl }),
+      body: JSON.stringify({ walletAddress, walletType, ownerUrl }),
     });
   }
 
@@ -224,11 +225,11 @@ export class SeedstrClient {
    */
   async uploadFile(filePath: string): Promise<FileAttachment> {
     const config = getConfig();
-    
+
     // Get file info
     const stats = statSync(filePath);
     const fileName = basename(filePath);
-    
+
     // Determine MIME type based on extension
     const ext = fileName.split(".").pop()?.toLowerCase() || "";
     const mimeTypes: Record<string, string> = {
@@ -253,13 +254,22 @@ export class SeedstrClient {
 
     logger.debug(`Uploading file: ${fileName} (${stats.size} bytes, ${mimeType})`);
 
-    // Read file and convert to base64
+    // Read file and convert to base64 only if file is reasonably small (<50MB)
     const fileBuffer = readFileSync(filePath);
+
+    // For large files, warn about memory usage
+    if (fileBuffer.length > 50 * 1024 * 1024) {
+      logger.warn(
+        `Large file upload: ${fileName} is ${(fileBuffer.length / 1024 / 1024).toFixed(1)}MB, ` +
+        `which will use significant memory for base64 encoding`
+      );
+    }
+
     const base64Content = fileBuffer.toString("base64");
 
     // Upload to the v1/upload endpoint (server-side upload API)
     const uploadUrl = `${config.seedstrApiUrl}/upload`;
-    
+
     const response = await fetch(uploadUrl, {
       method: "POST",
       headers: {
@@ -280,16 +290,28 @@ export class SeedstrClient {
     if (!response.ok) {
       const errorText = await response.text();
       logger.error(`Upload failed: ${response.status} - ${errorText}`);
-      throw new Error(`File upload failed: ${response.status}`);
+      throw new Error(
+        `File upload failed: ${response.status} - ${
+          errorText.substring(0, 200) || "Unknown error"
+        }`
+      );
     }
 
-    const result = (await response.json()) as { success: boolean; files: FileUploadResult[]; failed?: { name: string; error: string }[] };
-    
+    const result = (await response.json()) as {
+      success: boolean;
+      files: FileUploadResult[];
+      failed?: { name: string; error: string }[];
+    };
+
     if (!result.success || !result.files || result.files.length === 0) {
-      throw new Error("Upload failed: No files returned");
+      throw new Error(
+        `Upload failed: ${
+          result.failed?.[0]?.error || "No files returned"
+        }`
+      );
     }
-    
-    const fileResult = result.files[0];
+
+    const fileResult = result.files[0]!;
     logger.debug(`File uploaded successfully: ${fileResult.url}`);
 
     return {
@@ -326,6 +348,26 @@ export class SeedstrClient {
    */
   hasApiKey(): boolean {
     return !!this.apiKey;
+  }
+
+  /**
+   * Get the status of a submitted response
+   * @param jobId - The job ID
+   * @param responseId - The response ID
+   * @returns The response with current status (PENDING, ACCEPTED, or REJECTED)
+   */
+  async getResponseStatus(jobId: string, responseId: string): Promise<JobResponse> {
+    return this.request<JobResponse>(`/jobs/${jobId}/responses/${responseId}`, {}, false);
+  }
+
+  /**
+   * List all responses for a job
+   * @param jobId - The job ID
+   * @returns Array of all responses for the job
+   */
+  async getJobResponses(jobId: string): Promise<JobResponse[]> {
+    const result = await this.request<{ responses: JobResponse[] }>(`/jobs/${jobId}/responses`, {}, false);
+    return result.responses;
   }
 }
 

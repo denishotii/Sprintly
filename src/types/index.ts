@@ -30,6 +30,8 @@ export interface AgentInfo extends Agent {
   verification: VerificationStatus;
 }
 
+export type WalletType = "ETH" | "SOL";
+
 export type JobType = "STANDARD" | "SWARM";
 
 export interface Job {
@@ -172,7 +174,8 @@ export interface AgentConfig {
   tavilyApiKey?: string;
 
   // Wallet
-  solanaWalletAddress: string;
+  walletAddress: string;
+  walletType: WalletType;
 
   // LLM provider (direct API — no OpenRouter)
   primaryProvider: LLMProviderName;
@@ -227,6 +230,7 @@ export interface StoredConfig {
   seedstrApiKey?: string;
   agentId?: string;
   walletAddress?: string;
+  walletType?: WalletType;
   isVerified?: boolean;
   name?: string;
   bio?: string;
@@ -285,6 +289,8 @@ export type AgentEvent =
   | { type: "files_uploading"; job: Job; fileCount: number }
   | { type: "files_uploaded"; job: Job; files: FileAttachment[] }
   | { type: "response_submitted"; job: Job; responseId: string; hasFiles?: boolean }
+  | { type: "response_accepted"; message: string; metadata: { jobId: string; responseId: string } }
+  | { type: "response_rejected"; message: string; metadata: { jobId: string; responseId: string } }
   | { type: "error"; message: string; error?: Error }
   | { type: "shutdown" };
 

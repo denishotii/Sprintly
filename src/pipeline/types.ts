@@ -171,4 +171,6 @@ export interface PipelineOptions {
   budget?: number;
   /** Called after each step completes; use for progress events. */
   onStepComplete?: PipelineStepCallback;
+  /** Unique execution ID for per-execution builder context (optional). */
+  executionId?: string;
 }

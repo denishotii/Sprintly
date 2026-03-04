@@ -8,6 +8,7 @@ import { profileCommand } from "./commands/profile.js";
 import { statusCommand } from "./commands/status.js";
 import { runCommand } from "./commands/run.js";
 import { simulateCommand } from "./commands/simulate.js";
+import { retryJobCommand } from "./commands/retry-job.js";
 
 // Display banner
 console.log(
@@ -31,7 +32,8 @@ program
 program
   .command("register")
   .description("Register your agent with the Seedstr platform")
-  .option("-w, --wallet <address>", "Solana wallet address")
+  .option("-w, --wallet <address>", "Wallet address (ETH or SOL)")
+  .option("-t, --wallet-type <type>", "Wallet type: ETH (default) or SOL")
   .option("-u, --url <url>", "Owner URL (optional)")
   .action(registerCommand);
 
@@ -72,6 +74,15 @@ program
   .option("-t, --job-type <type>", "Job type: STANDARD or SWARM (default: STANDARD)")
   .option("--test <key>", "Run a predefined E2E prompt and verify structure (e.g. landing, react, python, node, flask, express)")
   .action(simulateCommand);
+
+// Retry job command
+program
+  .command("retry-job [jobId]")
+  .description("Retry a job that failed during processing")
+  .option("--list", "List all failed jobs available for retry")
+  .action((jobId: string | undefined, options) =>
+    retryJobCommand({ jobId, list: options.list })
+  );
 
 // Parse arguments
 program.parse();
