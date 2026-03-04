@@ -254,6 +254,10 @@ function buildSubmissionMessage(
 
   let runInstructions: string;
   switch (mode) {
+    case "document":
+      runInstructions =
+        "**To view:** Extract the zip and open `report.md` in any markdown viewer or text editor.";
+      break;
     case "python":
       runInstructions =
         "**To get started:** Extract the zip.\n" +

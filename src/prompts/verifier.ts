@@ -149,7 +149,8 @@ export function getVerifierPrompt(mode: ProjectMode): string {
     case "node":
       return NODE_VERIFIER_PROMPT;
     case "text":
-      // Text tasks skip the verifier entirely — this should never be called
+    case "document":
+      // These modes skip the verifier entirely — this should never be called
       return WEB_VERIFIER_PROMPT;
     default: {
       const _exhaustiveCheck: never = mode;

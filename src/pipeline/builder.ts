@@ -9,6 +9,7 @@ import { getLLMClient } from "../llm/client.js";
 import {
   getBuilderPromptForMode,
   TEXT_RESPONSE_SYSTEM_PROMPT,
+  DOCUMENT_WRITER_SYSTEM_PROMPT,
   assembleBuilderUserMessage,
 } from "../prompts/index.js";
 import { getFullDesignSystem } from "../templates/index.js";
@@ -241,6 +242,25 @@ function generateAIAgentInstructionsForMode(
   const hasMainPy = files.some((f) => f.path.replace(/\\/g, "/").toLowerCase() === "main.py");
   const filesList = buildProjectFilesSection(files);
 
+  if (mode === "document") {
+    return `# AI Agent Instructions
+
+## What was implemented
+${taskSummary}
+
+## How to view
+Open \`report.md\` in any markdown viewer, text editor, or render it with a tool like \`grip\`, \`glow\`, or GitHub's markdown preview.
+
+## Project files
+${filesList}
+
+## Quick test
+1. Open \`report.md\` and confirm it contains the information requested.
+2. Check that all major topics from the original request are covered with sufficient detail.
+3. Verify any tables, code examples, or structured data are correctly formatted.
+`;
+  }
+
   if (mode === "website" || mode === "web-app" || mode === "react-app") {
     return `# AI Agent Instructions
 
@@ -401,6 +421,37 @@ export async function runBuilder(
     };
   }
 
+  // Document-mode tasks: generate a comprehensive markdown report and deliver it as a file.
+  // The grading agent receives report.md + AI_AGENT_INSTRUCTIONS.md (auto-added below).
+  if (plan.mode === "document") {
+    logger.debug("Builder: document mode — generating markdown report");
+    const result = await llm.generateForStep("textResponse", {
+      prompt: jobPrompt,
+      systemPrompt: DOCUMENT_WRITER_SYSTEM_PROMPT,
+      tools: false,
+      temperature: 0.5,
+      maxTokens: 8000,
+    });
+
+    const reportFile: ProjectFile = {
+      path: "report.md",
+      content: result.text,
+    };
+
+    // AI_AGENT_INSTRUCTIONS.md is auto-added by the code below (files.length > 0).
+    // We skip README.md for document mode — report.md IS the document.
+    return {
+      files: [reportFile],
+      usage: result.usage
+        ? {
+            promptTokens: result.usage.promptTokens,
+            completionTokens: result.usage.completionTokens,
+            totalTokens: result.usage.totalTokens,
+          }
+        : undefined,
+    };
+  }
+
   // Code mode: generate files — use mode-specific system prompt (website, web-app, react-app, python, node)
   const systemPrompt = getBuilderPromptForMode(plan.mode);
   let userMessage = assembleBuilderUserMessage({ jobPrompt, plan });
@@ -513,7 +564,8 @@ export async function runBuilder(
   // Inject design system CSS only for website and web-app (not react-app; they handle their own styling)
   injectDesignSystemCssIfNeeded(files, plan.mode);
 
-  // Ensure README.md exists — content depends on mode (browser vs pip/npm)
+  // Ensure README.md exists — content depends on mode (browser vs pip/npm).
+  // Note: document mode returns early above, so this is only reached for code modes.
   const hasReadme = files.some((f) => f.path.toLowerCase().replace(/\\/g, "/") === "readme.md");
   if (!hasReadme && files.length > 0) {
     logger.debug("Builder: auto-generating README.md (mode-aware)");

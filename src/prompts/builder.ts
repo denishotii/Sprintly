@@ -361,11 +361,14 @@ export function getBuilderPromptForMode(mode: ProjectMode): string {
     case "node":
       return NODE_BUILDER_PROMPT;
     case "text":
-      // Calling the builder with "text" mode is a programming error — text tasks bypass
-      // the builder entirely and use TEXT_RESPONSE_SYSTEM_PROMPT directly.
       throw new Error(
         "getBuilderPromptForMode: 'text' mode produces no files. " +
           "Use TEXT_RESPONSE_SYSTEM_PROMPT for text tasks instead."
+      );
+    case "document":
+      throw new Error(
+        "getBuilderPromptForMode: 'document' mode uses DOCUMENT_WRITER_SYSTEM_PROMPT directly. " +
+          "This function should not be called for document tasks."
       );
     default: {
       // TypeScript exhaustiveness guard — compile-time error if a new ProjectMode is added

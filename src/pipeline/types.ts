@@ -16,8 +16,9 @@ import type { ProjectFile } from "../tools/projectBuilder.js";
  * - python:    Python scripts, Flask/Django apps
  * - node:      Node.js scripts, Express APIs, CLI tools
  * - text:      Writing, summaries, analysis (no project files)
+ * - document:  Technical guides, reports, CVE lists, security strategies — delivers report.md + AI_AGENT_INSTRUCTIONS.md
  */
-export type ProjectMode = "website" | "web-app" | "react-app" | "python" | "node" | "text";
+export type ProjectMode = "website" | "web-app" | "react-app" | "python" | "node" | "text" | "document";
 
 /** Modes that produce HTML output (browser-runnable). */
 export const WEB_MODES: ProjectMode[] = ["website", "web-app", "react-app"];
