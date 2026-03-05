@@ -45,10 +45,7 @@ Every project zip must contain:
     app.js         ← application logic (required if JS needed)
   README.md        ← always required
 
-Optional additions:
-  assets/          ← images, icons, fonts
-  components/      ← HTML partials or JS modules
-  data/            ← JSON data files
+IMPORTANT: Do NOT create extra files beyond what the plan specifies. Only add a data/ file (e.g. data/items.json) if it is explicitly listed in the plan.
 `.trim();
 
 export const HTML_QUALITY_RULES = `

@@ -23,15 +23,39 @@ If the plan or prompt is vague, incomplete, or random:
 2. **Build something working.** Even if the request is "make a button", build a complete index.html with a styled button.
 3. **Always produce files.** Never return an empty project. If you're unsure, build a "Hello World" or a basic template that matches the tech stack.
 
-## How to Submit Your Work (REQUIRED — YOU MUST DO THIS)
-You MUST call the create_project tool exactly once with ALL files. This is mandatory.
+## CRITICAL: Only Create Planned Files
+Do NOT create any files beyond what is listed in the plan. If the plan lists 5 files, create exactly those 5 files.
+- Do NOT add extra HTML pages, extra components, or extra data files unless they are in the plan.
+- All README/documentation content MUST go in README.md — never split it across multiple files.
+- Do NOT create AI_AGENT_INSTRUCTIONS.md — the pipeline auto-generates it.
 
-- Do NOT reply with code blocks or file contents in your text. The only way to deliver the project is by invoking the create_project tool.
-- create_project accepts: projectName (string) and files (array of { path: string, content: string }).
+## How to Submit Your Work (REQUIRED)
+Call the create_project tool once with ALL files. This is the preferred delivery method.
+
+- create_project accepts: projectName (string) and files (array of { path, content }).
 - Include every file from the plan. Each file must have complete, runnable content.
-- Do NOT create AI_AGENT_INSTRUCTIONS.md — the pipeline auto-generates it with the correct format for the grading agent. If you include it, it will be overwritten anyway.
 - README.md must be complete: project name, description, prerequisites, exact install + run commands, and a short features list.
-- If you do not call create_project with a non-empty files array, the project will be empty and the task will fail. You must call the tool.
+
+### Fallback: Code Blocks
+If you cannot use the tool, output each file as a fenced markdown code block.
+Each block MUST start with a file-path comment on its first line:
+
+\`\`\`html
+<!-- index.html -->
+<!DOCTYPE html>
+...
+\`\`\`
+
+\`\`\`css
+/* styles/main.css */
+:root { ... }
+\`\`\`
+
+\`\`\`javascript
+// scripts/app.js
+'use strict';
+...
+\`\`\`
 `.trim();
 
 // ─────────────────────────────────────────────────────────────────────────────

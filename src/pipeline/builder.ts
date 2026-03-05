@@ -14,7 +14,6 @@ import {
 } from "../prompts/index.js";
 import { getFullDesignSystem } from "../templates/index.js";
 import { logger } from "../utils/logger.js";
-import { getConfig } from "../config/index.js";
 import type { PlanResult, BuildResult, StepUsage, ProjectMode, BuilderMetrics } from "./types.js";
 import type { ProjectFile } from "../tools/projectBuilder.js";
 
@@ -115,7 +114,14 @@ const FENCED_BLOCK_REGEX = /```(\w*)\s*\n?([\s\S]*?)```/g;
 /**
  * Fallback: extract project files from markdown code blocks in the model's text response.
  * Used when the model outputs code in the message body instead of via create_project.
- * Assigns paths from the plan when possible, otherwise mode-aware defaults.
+ *
+ * Path resolution order:
+ *   1. File-path comment on the first line (e.g. `<!-- index.html -->`, `// scripts/app.js`)
+ *   2. Plan file path by index
+ *   3. Mode-aware default (returns null for unrecognised blocks)
+ *
+ * Blocks that cannot be mapped to a file are merged into README.md instead of creating
+ * generic file5.html / file6.html junk files.
  */
 function parseCodeBlocksFromText(text: string, plan: PlanResult): ProjectFile[] {
   if (!text || text.trim().length === 0) return [];
@@ -132,34 +138,77 @@ function parseCodeBlocksFromText(text: string, plan: PlanResult): ProjectFile[] 
   const planPaths = plan.files.map((f) => f.path);
   const files: ProjectFile[] = [];
   const usedPaths = new Set<string>();
+  let extraReadmeContent = "";
 
-  function defaultPathForBlock(lang: string, index: number, blockContent: string): string {
+  /** Mode-aware default path. Returns null (instead of file${N}.html) for unrecognised blocks. */
+  function defaultPathForBlock(lang: string, index: number, blockContent: string): string | null {
     if (plan.mode === "python") {
       if (index === 0) return "main.py";
       if (lang === "text" || lang === "txt" || looksLikeRequirements(blockContent)) return "requirements.txt";
-      return `file${index + 1}.py`;
+      if (lang === "python" || lang === "py") return null;
+      return null;
     }
     if (plan.mode === "node") {
       if (index === 0) return "index.js";
       if (lang === "json") return "package.json";
-      return `file${index + 1}.js`;
+      return null;
     }
     if (plan.mode === "website" || plan.mode === "web-app") {
-      if (index === 0 || lang === "html") return "index.html";
-      if (lang === "css") return index === 1 ? "styles/main.css" : `styles/file${index}.css`;
-      if (lang === "javascript" || lang === "js") return index === 1 ? "scripts/app.js" : `scripts/file${index}.js`;
-      return index === 0 ? "index.html" : `file${index}.html`;
+      if (lang === "html") return "index.html";
+      if (lang === "css") return "styles/main.css";
+      if (lang === "javascript" || lang === "js") return "scripts/app.js";
+      if (lang === "json") return "data/data.json";
+      return null;
     }
-    if (plan.mode === "react-app") return index === 0 ? "index.html" : `file${index}.html`;
-    return planPaths[index] ?? `file${index + 1}.txt`;
+    if (plan.mode === "react-app") return index === 0 ? "index.html" : null;
+    return planPaths[index] ?? null;
   }
 
   for (let i = 0; i < blocks.length; i++) {
-    const path = planPaths[i] ?? defaultPathForBlock(blocks[i].lang, i, blocks[i].content);
+    const { lang, content } = blocks[i];
+
+    // Skip pure documentation/markdown blocks — collect for README
+    if (lang === "markdown" || lang === "md") {
+      extraReadmeContent += (extraReadmeContent ? "\n\n" : "") + content;
+      continue;
+    }
+
+    // 1. Detect file path from first-line comment (e.g. <!-- index.html -->)
+    let path: string | null = detectPathFromContent(content, lang);
+
+    // 2. Try plan path by index
+    if (!path && i < planPaths.length) {
+      path = planPaths[i];
+    }
+
+    // 3. Mode-aware default
+    if (!path) {
+      path = defaultPathForBlock(lang, i, content);
+    }
+
+    // 4. Unplaceable block → merge into README instead of creating file${N}.html
+    if (!path) {
+      extraReadmeContent += (extraReadmeContent ? "\n\n" : "") + content;
+      continue;
+    }
+
     const normalized = path.replace(/\\/g, "/");
     if (usedPaths.has(normalized)) continue;
     usedPaths.add(normalized);
-    files.push({ path: normalized, content: blocks[i].content });
+    files.push({ path: normalized, content });
+  }
+
+  // Merge leftover content into README.md
+  if (extraReadmeContent) {
+    const readmeIdx = files.findIndex(
+      (f) => f.path.toLowerCase().replace(/\\/g, "/") === "readme.md"
+    );
+    if (readmeIdx >= 0) {
+      files[readmeIdx].content += "\n\n" + extraReadmeContent;
+    } else if (!usedPaths.has("README.md")) {
+      files.push({ path: "README.md", content: extraReadmeContent });
+      usedPaths.add("README.md");
+    }
   }
 
   return files;
@@ -168,6 +217,34 @@ function parseCodeBlocksFromText(text: string, plan: PlanResult): ProjectFile[] 
 function looksLikeRequirements(content: string): boolean {
   const line = content.trim().split("\n")[0] ?? "";
   return /^[\w\-_.]+(\s*[=<>]=?\s*[\w.*]+)?\s*$/.test(line) && !line.includes("def ") && !line.includes("import ");
+}
+
+/**
+ * Try to detect a file path from a comment on the first line of a code block.
+ * Models often output paths like `<!-- index.html -->` or `// scripts/app.js`.
+ */
+function detectPathFromContent(content: string, lang: string): string | null {
+  const firstLine = content.split("\n")[0].trim();
+
+  // HTML comment: <!-- path/to/file.ext -->
+  const htmlMatch = firstLine.match(/^<!--\s*(\S+\.\w+)\s*-->$/);
+  if (htmlMatch) return htmlMatch[1].trim();
+
+  // JS/CSS single-line: // path/to/file.ext
+  const slashMatch = firstLine.match(/^\/\/\s*(\S+\.\w+)\s*$/);
+  if (slashMatch) return slashMatch[1].trim();
+
+  // CSS block comment: /* path/to/file.ext */
+  const blockMatch = firstLine.match(/^\/\*\s*(\S+\.\w+)\s*\*\/$/);
+  if (blockMatch) return blockMatch[1].trim();
+
+  // Python/YAML/text: # file.ext (not markdown headings like # Title)
+  if (lang === "python" || lang === "py" || lang === "yaml" || lang === "txt" || lang === "text") {
+    const pyMatch = firstLine.match(/^#\s+(\S+\.\w+)\s*$/);
+    if (pyMatch) return pyMatch[1].trim();
+  }
+
+  return null;
 }
 
 /**
@@ -469,12 +546,12 @@ export async function runBuilder(
   const systemPrompt = getBuilderPromptForMode(plan.mode);
   let userMessage = assembleBuilderUserMessage({ jobPrompt, plan });
 
-  const config = getConfig();
   const builderMaxTokens = parseInt(process.env.BUILDER_MAX_TOKENS || "16000", 10);
 
   const builderOptions = {
     systemPrompt,
     tools: true as const,
+    toolChoice: "auto" as const,
     maxTokens: builderMaxTokens,
     temperature: 0.4,
     providerOptions: BUILDER_PROVIDER_OPTIONS,
@@ -521,13 +598,29 @@ export async function runBuilder(
     logger.warn("Builder: no tool calls in LLM response — model must call create_project with all files");
   }
 
-  // Retry once WITHOUT tools — ask for plain markdown code blocks instead.
-  // This avoids the tool-call JSON serialisation bug where some models pass `files` as a
-  // Python-syntax string rather than a proper JSON array, causing 0 files to be extracted.
+  // Try parsing code blocks from the first response BEFORE making a second LLM call.
+  // With toolChoice: "auto", the model may output code blocks in its text alongside tool calls.
+  if (files.length === 0 && firstResponseText.trim()) {
+    const textFallbackFiles = parseCodeBlocksFromText(firstResponseText, plan);
+    if (textFallbackFiles.length > 0) {
+      files = textFallbackFiles;
+      metrics.usedMarkdownFallback = true;
+      metrics.filesFromFallback = textFallbackFiles.length;
+      logger.info(
+        `Builder: recovered ${files.length} file(s) from code blocks in first response (no retry needed)`
+      );
+    }
+  }
+
+  // Retry once WITHOUT tools if we still have no files — last resort.
   if (files.length === 0) {
     metrics.retriedForZeroFiles = true;
     const noToolsNudge =
-      "\n\n[Tool call produced no files. Output each file as a complete markdown code block instead — do NOT call any tools. Example format:\n\n```python\n# main.py\n(full file content here)\n```\n\nOutput ALL project files now as code blocks:]";
+      "\n\n[Tool call produced no files. Output each file as a complete markdown code block. " +
+      "Start each block with a file-path comment (e.g. <!-- index.html --> or // scripts/app.js). " +
+      "ONLY create files listed in the plan. Example:\n\n" +
+      "```html\n<!-- index.html -->\n<!DOCTYPE html>\n...\n```\n\n" +
+      "Output ALL project files now as code blocks:]";
     logger.info("Builder: 0 files extracted — retrying without tools (code block fallback)");
     const retryResult = await llm.generateForStep("builder", {
       prompt: userMessage + noToolsNudge,
@@ -556,24 +649,6 @@ export async function runBuilder(
         logger.info(`Builder: retry (no-tools) succeeded — ${files.length} file(s) from code blocks`);
       } else {
         logger.warn("Builder: retry (no-tools) returned text but no code blocks found");
-      }
-    }
-  }
-
-  // Last-resort fallback: parse code blocks from the model's text (first response, then retry)
-  if (files.length === 0) {
-    for (const text of [firstResponseText, result.text].filter(Boolean)) {
-      const trimmed = (text as string).trim();
-      if (!trimmed) continue;
-      const fallbackFiles = parseCodeBlocksFromText(trimmed, plan);
-      if (fallbackFiles.length > 0) {
-        files = fallbackFiles;
-        metrics.usedMarkdownFallback = true;
-        metrics.filesFromFallback = fallbackFiles.length;
-        logger.info(
-          `Builder: recovered ${files.length} file(s) from code blocks in text response (fallback for mystery prompts)`
-        );
-        break;
       }
     }
   }
