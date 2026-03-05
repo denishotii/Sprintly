@@ -513,8 +513,8 @@ export async function runBuilder(
       prompt: jobPrompt,
       systemPrompt: DOCUMENT_WRITER_SYSTEM_PROMPT,
       tools: false,
-      temperature: 0.5,
-      maxTokens: 8000,
+      temperature: 0.3,
+      maxTokens: 16000,
     });
 
     const reportFile: ProjectFile = {
@@ -522,10 +522,17 @@ export async function runBuilder(
       content: result.text,
     };
 
-    // AI_AGENT_INSTRUCTIONS.md is auto-added by the code below (files.length > 0).
-    // We skip README.md for document mode — report.md IS the document.
+    // Document mode: report.md IS the document (no separate README needed).
+    // AI_AGENT_INSTRUCTIONS.md is mandatory for the grading agent — add it here
+    // since the early return below skips the auto-generation code at the end of this function.
+    const docFiles: ProjectFile[] = [reportFile];
+    docFiles.push({
+      path: AI_AGENT_INSTRUCTIONS_FILENAME,
+      content: generateAIAgentInstructionsForMode("document", plan.taskSummary, docFiles),
+    });
+
     return {
-      files: [reportFile],
+      files: docFiles,
       usage: result.usage
         ? {
             promptTokens: result.usage.promptTokens,

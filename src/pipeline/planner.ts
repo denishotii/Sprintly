@@ -418,8 +418,8 @@ export async function runPlanner(
     prompt: userMessage,
     systemPrompt: PLANNER_SYSTEM_PROMPT,
     tools: false, // Planner outputs JSON directly
-    maxTokens: 8192, // Allow ample room for JSON plan
-    temperature: 0.4, // Allow slight creativity for vague prompts
+    maxTokens: 2048, // JSON plans are typically <1KB; lower cap = faster response
+    temperature: 0.3, // Lower temperature for more deterministic JSON output
     providerOptions: PLANNER_PROVIDER_OPTIONS,
   });
 
@@ -442,8 +442,8 @@ export async function runPlanner(
       systemPrompt: PLANNER_SYSTEM_PROMPT,
       tools: true,
       toolChoice: "none",
-      maxTokens: 8192,
-      temperature: 0.5,
+      maxTokens: 2048,
+      temperature: 0.4,
       providerOptions: PLANNER_PROVIDER_OPTIONS,
     });
     responseText = result.text?.trim() || result.reasoning || "";
