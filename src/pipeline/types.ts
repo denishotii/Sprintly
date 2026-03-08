@@ -54,6 +54,11 @@ export interface PlanResult {
   files: PlanFile[];
   designNotes: string;
   complexityEstimate: "low" | "medium" | "high";
+  // Enhanced design system (Phase 1)
+  theme?: "modern" | "corporate" | "playful" | "minimal" | "bold" | "creative";
+  typography?: "modern" | "elegant" | "editorial" | "friendly" | "professional" | "minimal" | "playful" | "bold";
+  // Component library (Phase 2)
+  recommendedComponents?: string[]; // Component names from the component library to use
 }
 
 // ─────────────────────────────────────────

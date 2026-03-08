@@ -13,7 +13,45 @@
  *   builder.addFile('styles/components.css', getComponentsCSS());
  */
 
-export { BUILDER_COMPONENT_EXAMPLES } from "./prompt-examples.js";
+export {
+  BUILDER_COMPONENT_EXAMPLES,
+} from "./prompt-examples.js";
+
+export {
+  COLOR_THEMES,
+  TYPOGRAPHY_THEMES,
+  detectThemeFromPrompt,
+  detectTypographyFromPrompt,
+  getThemeCSS,
+  getTypographyCSS,
+  getEnhancedDesignSystemCSS,
+  getDefaultDesignTokens,
+  type ColorTheme,
+  type ThemeName,
+  type TypographyTheme,
+  type TypographyName,
+  type DesignTokens,
+} from "./designSystem.js";
+
+export {
+  COMPONENT_LIBRARY,
+  getComponentByName,
+  findComponentsForPrompt,
+  getComponentsBySection,
+  type WebComponent,
+} from "./componentLibrary.js";
+
+export {
+  ANIMATION_CDNS,
+  ANIMATION_DATA_ATTRIBUTES,
+  ANIMATION_BEST_PRACTICES,
+  getAnimationCSS,
+  getScrollRevealScript,
+  getAOSScript,
+  getGSAPScript,
+  getRecommendedAnimationLibrary,
+  getAnimationScript,
+} from "./animationLibraries.js";
 
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";

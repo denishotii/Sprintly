@@ -33,6 +33,8 @@ You can optionally include a brief <thinking> block before the JSON to explain y
     { "path": "index.html", "description": "Main entry point and layout" }
   ],
   "designNotes": "Brief notes on visual style, color scheme, or UX requirements",
+  "theme": "modern" | "corporate" | "playful" | "minimal" | "bold" | "creative",
+  "typography": "modern" | "elegant" | "editorial" | "friendly" | "professional" | "minimal" | "playful" | "bold",
   "complexityEstimate": "low" | "medium" | "high"
 }
 
@@ -42,6 +44,52 @@ You can optionally include a brief <thinking> block before the JSON to explain y
 - MUST include: index.html, styles/main.css, README.md
 - Include scripts/app.js if the project needs JavaScript
 - Add extra files as needed (data/items.json, components/card.html, etc.)
+
+### Theme & Typography Selection
+
+**Themes** — Choose based on business type and target audience:
+- **modern**: Tech, SaaS, startups, software platforms, AI tools → bright blues, clean design
+- **corporate**: Finance, law, consulting, enterprise → professional indigo/slate, trustworthy
+- **playful**: Creative agencies, gaming, entertainment, kids → vibrant oranges/purples, energetic
+- **minimal**: Blogs, editorial, portfolios, artists → clean blacks/whites, elegant
+- **bold**: Luxury, fashion, premium products → dramatic jewel tones, high-contrast
+- **creative**: Photography, studios, portfolios, content creators → warm peachy and sage tones
+
+**Typography** — Choose to match the design personality:
+- **modern**: Inter (clean, neutral, tech-forward)
+- **elegant**: Poppins + Open Sans (upscale, sophisticated)
+- **editorial**: Playfair Display + Lora (classical, sophisticated)
+- **friendly**: Fredoka + Nunito (approachable, warm)
+- **professional**: Roboto (neutral, trustworthy)
+- **minimal**: Syne + Epilogue (modern, minimal)
+- **playful**: Righteous + Quicksand (energetic, friendly)
+- **bold**: Space Grotesk (geometric, dramatic)
+
+## Component Library
+
+For website and web-app modes, you can recommended pre-built components. Mention which components the Builder should use in \`designNotes\`:
+
+**Available Components:**
+- \`hero-basic\` — Simple hero with title, subtitle, CTA button
+- \`hero-with-image\` — Hero with image on the right side
+- \`navigation-bar\` — Sticky nav with logo and menu (mobile-friendly)
+- \`features-grid\` — 3-column grid of feature cards
+- \`features-with-images\` — Alternating features with images
+- \`pricing-table\` — Three pricing tiers with feature comparison
+- \`testimonial-cards\` — 3-column grid of customer testimonials
+- \`contact-form\` — Contact form (name, email, message)
+- \`footer-multi-column\` — Multi-column footer with links and newsletter
+- \`cta-section\` — Bold call-to-action with gradient background
+- \`gallery-grid\` — 8-item image gallery (4-column responsive)
+- \`team-section\` — Team member cards with photos and bios
+
+**Component Selection Tips:**
+- Look for keywords in the prompt: "pricing" → recommend \`pricing-table\`
+- "gallery", "portfolio" → recommend \`gallery-grid\` or \`image-gallery\`
+- "team", "about" → recommend \`team-section\`
+- "contact" → recommend \`contact-form\`
+- Landing pages → typically use \`navigation-bar\`, \`hero-basic\`/\`hero-with-image\`, features, \`testimonial-cards\`, \`cta-section\`, \`footer-multi-column\`
+- Marketing sites → recommend \`hero-with-image\`, \`features-with-images\`, \`pricing-table\` if applicable
 
 ### react-app
 - MUST include ONLY: index.html (contains the entire React app in an inline <script type="text/babel"> block), README.md
@@ -128,6 +176,8 @@ Example 1 — "Build a landing page for a coffee shop called Bean Dreams"
     { "path": "README.md", "description": "Overview and how to open the site" }
   ],
   "designNotes": "Warm earthy tones (brown, cream, terracotta). Elegant serif headings with sans-serif body. Full-bleed hero image using CSS gradients.",
+  "theme": "creative",
+  "typography": "elegant",
   "complexityEstimate": "medium"
 }
 
@@ -144,6 +194,8 @@ Example 2 — "Create a quiz app with 10 questions about world capitals"
     { "path": "README.md", "description": "Overview and instructions" }
   ],
   "designNotes": "Clean card-based layout. Green highlight for correct, red for wrong. Progress bar showing question number.",
+  "theme": "modern",
+  "typography": "friendly",
   "complexityEstimate": "medium"
 }
 

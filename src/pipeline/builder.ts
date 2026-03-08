@@ -12,7 +12,14 @@ import {
   DOCUMENT_WRITER_SYSTEM_PROMPT,
   assembleBuilderUserMessage,
 } from "../prompts/index.js";
-import { getFullDesignSystem } from "../templates/index.js";
+import {
+  getFullDesignSystem,
+  getEnhancedDesignSystemCSS,
+  detectThemeFromPrompt,
+  detectTypographyFromPrompt,
+  type ThemeName,
+  type TypographyName,
+} from "../templates/index.js";
 import { logger } from "../utils/logger.js";
 import type { PlanResult, BuildResult, StepUsage, ProjectMode, BuilderMetrics } from "./types.js";
 import type { ProjectFile } from "../tools/projectBuilder.js";
@@ -25,6 +32,8 @@ const BUILDER_PROVIDER_OPTIONS = {
 } as Record<string, Record<string, unknown>>;
 
 // Cache design system CSS at module load to avoid re-generating on every build
+// Note: With enhanced design system, we now generate CSS per-theme, so less caching benefit
+// but we keep this structure for the fallback non-themed version
 const CACHED_DESIGN_SYSTEM = getFullDesignSystem();
 
 /** Modes that receive design system CSS injection (base + components). React handles its own styling. */
@@ -441,24 +450,32 @@ See README.md for setup and run instructions.
 
 /**
  * Inject design system CSS into styles/main.css for website and web-app modes.
+ * Uses the enhanced design system with theme support from the Planner output.
  * Mutates the files array in place: either prepends to existing styles/main.css or appends a new file.
  */
-function injectDesignSystemCssIfNeeded(files: ProjectFile[], mode: ProjectMode): void {
+function injectDesignSystemCssIfNeeded(files: ProjectFile[], mode: ProjectMode, plan: PlanResult, jobPrompt: string): void {
   if (!MODES_WITH_DESIGN_SYSTEM_CSS.includes(mode)) return;
+
+  // Detect or use planned theme/typography
+  const theme: ThemeName = (plan.theme as ThemeName) || (detectThemeFromPrompt(jobPrompt) as ThemeName) || "modern";
+  const typography: TypographyName = (plan.typography as TypographyName) || (detectTypographyFromPrompt(jobPrompt) as TypographyName) || "modern";
+
+  // Generate enhanced CSS with theme and typography
+  const enhancedCSS = getEnhancedDesignSystemCSS(theme, typography);
 
   const cssPath = "styles/main.css";
   const normalized = (p: string) => p.replace(/\\/g, "/").toLowerCase();
   const target = files.find((f) => normalized(f.path) === normalized(cssPath));
 
   if (target) {
-    target.content = `${CACHED_DESIGN_SYSTEM}\n\n/* ── Project styles ───────────────────────────────────────── */\n${target.content}`;
-    logger.debug("Builder: prepended design system CSS to styles/main.css");
+    target.content = `${enhancedCSS}\n\n/* ── Project styles ───────────────────────────────────────── */\n${target.content}`;
+    logger.debug(`Builder: prepended enhanced design system CSS (theme: ${theme}, typography: ${typography}) to styles/main.css`);
   } else {
     files.push({
       path: cssPath,
-      content: `${CACHED_DESIGN_SYSTEM}\n\n/* Project overrides */\n`,
+      content: `${enhancedCSS}\n\n/* Project overrides */\n`,
     });
-    logger.debug("Builder: added styles/main.css with design system (file was missing)");
+    logger.debug(`Builder: added styles/main.css with enhanced design system (theme: ${theme}, typography: ${typography})`);
   }
 }
 
@@ -671,7 +688,7 @@ export async function runBuilder(
   }
 
   // Inject design system CSS only for website and web-app (not react-app; they handle their own styling)
-  injectDesignSystemCssIfNeeded(files, plan.mode);
+  injectDesignSystemCssIfNeeded(files, plan.mode, plan, jobPrompt);
 
   // Ensure README.md exists — content depends on mode (browser vs pip/npm).
   // Note: document mode returns early above, so this is only reached for code modes.
