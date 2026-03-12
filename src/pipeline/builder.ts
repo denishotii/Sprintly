@@ -575,7 +575,7 @@ export async function runBuilder(
   const builderOptions = {
     systemPrompt,
     tools: true as const,
-    toolChoice: "auto" as const,
+    // Do NOT override toolChoice — let generateForStep enforce create_project tool usage
     maxTokens: builderMaxTokens,
     temperature: 0.4,
     providerOptions: BUILDER_PROVIDER_OPTIONS,
@@ -620,6 +620,7 @@ export async function runBuilder(
     }
   } else {
     logger.warn("Builder: no tool calls in LLM response — model must call create_project with all files");
+    logger.debug(`Builder: first response text (first 300 chars): ${firstResponseText.substring(0, 300).replace(/\n/g, "\\n")}`);
   }
 
   // Try parsing code blocks from the first response BEFORE making a second LLM call.

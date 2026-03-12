@@ -474,10 +474,11 @@ export async function runPlanner(
 
   // If text is empty, the model may have put everything into extended-thinking/reasoning
   if (!responseText && result.reasoning) {
+    const reasoningStr = typeof result.reasoning === "string" ? result.reasoning : JSON.stringify(result.reasoning);
     logger.warn(
-      `Planner: text is empty but reasoning has ${result.reasoning.length} chars — extracting JSON from reasoning`
+      `Planner: text is empty but reasoning has ${reasoningStr.length} chars — extracting JSON from reasoning`
     );
-    responseText = result.reasoning;
+    responseText = reasoningStr;
   }
 
   // Retry once if still empty
@@ -492,7 +493,8 @@ export async function runPlanner(
       temperature: 0.4,
       providerOptions: PLANNER_PROVIDER_OPTIONS,
     });
-    responseText = result.text?.trim() || result.reasoning || "";
+    const retryReasoningStr = typeof result.reasoning === "string" ? result.reasoning : JSON.stringify(result.reasoning);
+    responseText = result.text?.trim() || retryReasoningStr || "";
   }
 
   if (result.finishReason === "length") {
