@@ -15,10 +15,11 @@ import type { ProjectFile } from "../tools/projectBuilder.js";
  * - react-app: React/Vue apps loaded via CDN (no build step)
  * - python:    Python scripts, Flask/Django apps
  * - node:      Node.js scripts, Express APIs, CLI tools
+ * - fullstack: Full-stack Node.js + React + PostgreSQL applications
  * - text:      Writing, summaries, analysis (no project files)
  * - document:  Technical guides, reports, CVE lists, security strategies — delivers report.md + AI_AGENT_INSTRUCTIONS.md
  */
-export type ProjectMode = "website" | "web-app" | "react-app" | "python" | "node" | "text" | "document";
+export type ProjectMode = "website" | "web-app" | "react-app" | "python" | "node" | "fullstack" | "text" | "document";
 
 /** Modes that produce HTML output (browser-runnable). */
 export const WEB_MODES: ProjectMode[] = ["website", "web-app", "react-app"];
@@ -34,11 +35,14 @@ export const SCRIPT_MODES: ProjectMode[] = ["python", "node"];
 export interface PlanTechStack {
   styling: "tailwind" | "vanilla-css" | "both";
   interactivity: "none" | "vanilla-js" | "alpine" | "react" | "vue";
-  dataStorage: "none" | "localstorage" | "json-file" | "sqlite" | "filesystem";
+  dataStorage: "none" | "localstorage" | "json-file" | "sqlite" | "postgresql" | "filesystem";
   runtime: "browser" | "python" | "node";
   charts: boolean;
   icons: boolean;
 }
+
+/** Backend app type for fullstack mode. */
+export type BackendAppType = "ecommerce" | "dashboard" | "social" | "cms" | "api";
 
 /** A single file entry in the plan. */
 export interface PlanFile {
@@ -59,6 +63,8 @@ export interface PlanResult {
   typography?: "modern" | "elegant" | "editorial" | "friendly" | "professional" | "minimal" | "playful" | "bold";
   // Component library (Phase 2)
   recommendedComponents?: string[]; // Component names from the component library to use
+  // Full-stack backend (Phase 3)
+  backendAppType?: BackendAppType; // For fullstack mode: ecommerce, dashboard, social, cms, api
 }
 
 // ─────────────────────────────────────────

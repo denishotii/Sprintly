@@ -148,6 +148,9 @@ export function getVerifierPrompt(mode: ProjectMode): string {
       return PYTHON_VERIFIER_PROMPT;
     case "node":
       return NODE_VERIFIER_PROMPT;
+    case "fullstack":
+      // Fullstack uses node verifier initially — full backend validation in Phase 3b
+      return NODE_VERIFIER_PROMPT;
     case "text":
     case "document":
       // These modes skip the verifier entirely — this should never be called

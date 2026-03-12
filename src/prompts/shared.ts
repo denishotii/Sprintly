@@ -176,6 +176,13 @@ export function getTechStackRules(mode: ProjectMode): string {
       return PYTHON_TECH_STACK_RULES;
     case "node":
       return NODE_TECH_STACK_RULES;
+    case "fullstack":
+      return `## Tech Stack (Full-Stack)
+**Backend:** Express.js, Node.js, Prisma ORM
+**Database:** PostgreSQL (Docker-ready)
+**Frontend:** React 18+, Tailwind CSS
+**Deployment:** Docker Compose included
+Generates complete Node/React/PostgreSQL application with user authentication and API routes.`;
     case "text":
       return "## Tech Stack\nNo code project — text response only.";
     case "document":
@@ -203,6 +210,17 @@ export function getOutputStructure(mode: ProjectMode): string {
       return PYTHON_OUTPUT_STRUCTURE;
     case "node":
       return NODE_OUTPUT_STRUCTURE;
+    case "fullstack":
+      return `## Output\nFull-stack project with:
+- \`server.js\` (Express entry point)
+- \`routes/\` (API route files)
+- \`prisma/schema.prisma\` (Database schema)
+- \`package.json\` (Dependencies and scripts)
+- \`.env.example\` (Environment configuration)
+- \`public/index.html\` (Frontend entry point)
+- \`src/App.jsx\` (React main component)
+- \`docker-compose.yml\` (Docker configuration)
+- \`README.md\` (Full setup and deployment instructions)`;
     case "text":
       return "## Output\nNo files — deliver the response as plain text only.";
     case "document":

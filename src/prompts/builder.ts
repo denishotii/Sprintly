@@ -384,6 +384,9 @@ export function getBuilderPromptForMode(mode: ProjectMode): string {
       return PYTHON_BUILDER_PROMPT;
     case "node":
       return NODE_BUILDER_PROMPT;
+    case "fullstack":
+      // For fullstack, reuse node builder for now — full backend generation handled in Phase 3b
+      return NODE_BUILDER_PROMPT + `\n\n## Full-Stack Specific Instructions\n- Generate both backend (Express + Prisma) and frontend (React) code\n- Create routes in routes/ directory\n- Include prisma/schema.prisma with appropriate models\n- Include docker-compose.yml for PostgreSQL + server setup\n- Use create_project tool to submit all files at once`;
     case "text":
       throw new Error(
         "getBuilderPromptForMode: 'text' mode produces no files. " +

@@ -13,7 +13,7 @@ export interface PlannerResult {
   usage?: StepUsage;
 }
 
-const VALID_MODES: ProjectMode[] = ["website", "web-app", "react-app", "python", "node", "text", "document"];
+const VALID_MODES: ProjectMode[] = ["website", "web-app", "react-app", "python", "node", "fullstack", "text", "document"];
 
 // ─────────────────────────────────────────
 // Prompt-based mode detection (for fallback)
@@ -21,10 +21,11 @@ const VALID_MODES: ProjectMode[] = ["website", "web-app", "react-app", "python",
 
 /**
  * Detect likely project mode from the raw job prompt when JSON parsing fails.
- * Priority order: python > node > react-app > web-app > website (default).
+ * Priority order: fullstack > python > node > react-app > web-app > website (default).
  */
 function detectModeFromPrompt(prompt: string): ProjectMode {
   const p = prompt.toLowerCase();
+  if (/\b(full[- ]?stack|e[- ]?commerce|shopping|products|store|dashboard|database|backend|postgresql|prisma|user management|authentication)\b/.test(p)) return "fullstack";
   if (/\b(python|flask|django|fastapi|pip|\.py\b|pandas|numpy|scrape|scraping)\b/.test(p)) return "python";
   if (/\b(node\.?js|express|npm|cli\b|\.js\s+server|typescript\s+server|ts-node)\b/.test(p)) return "node";
   if (/\b(react|vue|angular|next\.?js|nuxt|svelte|jsx|tsx)\b/.test(p)) return "react-app";
@@ -100,6 +101,28 @@ function fallbackPlan(jobPrompt: string): PlanResult {
         complexityEstimate: "medium",
       };
 
+    case "fullstack":
+      return {
+        mode: "fullstack",
+        taskSummary: summary,
+        techStack: { styling: "tailwind", interactivity: "react", dataStorage: "postgresql", runtime: "node", charts: false, icons: true },
+        files: [
+          { path: "server.js",                      description: "Express.js server entry point" },
+          { path: "package.json",                   description: "Node.js dependencies and scripts" },
+          { path: "prisma/schema.prisma",           description: "Database schema (Prisma)" },
+          { path: ".env.example",                   description: "Environment variables template" },
+          { path: "routes/health.js",               description: "Health check API route" },
+          { path: "routes/data.js",                 description: "Data API routes" },
+          { path: "public/index.html",              description: "Frontend entry point" },
+          { path: "src/App.jsx",                    description: "React main component" },
+          { path: "docker-compose.yml",             description: "Docker setup for PostgreSQL + server" },
+          { path: "README.md",                      description: "Setup and deployment instructions" },
+        ],
+        designNotes: "Build a full-stack application with PostgreSQL backend and React frontend.",
+        complexityEstimate: "high",
+        backendAppType: "ecommerce", // Default; Planner should override
+      };
+
     default: // website
       return {
         mode: "website",
@@ -170,6 +193,29 @@ function enforceRequiredFiles(
       if (!hasEntry) ensure("index.js", "Main entry point", true);
       ensure("package.json", "Package manifest with name, version, main, scripts.start, dependencies");
       ensure("README.md",    "Setup, install, and run instructions");
+      break;
+    }
+
+    case "fullstack": {
+      // Ensure server entry point
+      const hasServer = paths.has("server.js") || paths.has("index.js") || paths.has("app.js");
+      if (!hasServer) ensure("server.js", "Express.js server entry point", true);
+
+      // Ensure package.json and database schema
+      ensure("package.json", "Node.js dependencies and scripts");
+      ensure("prisma/schema.prisma", "Prisma database schema");
+      ensure(".env.example", "Environment variables template");
+
+      // Ensure routes
+      if (!paths.has("routes/health.js") && !paths.has("routes/index.js")) {
+        ensure("routes/health.js", "Health check API route");
+        ensure("routes/data.js", "Data API routes");
+      }
+
+      // Ensure frontend
+      ensure("public/index.html", "Frontend entry point");
+      ensure("README.md", "Setup, deployment, and Docker instructions");
+      ensure("docker-compose.yml", "Docker Compose configuration");
       break;
     }
 

@@ -19,7 +19,7 @@ You can optionally include a brief <thinking> block before the JSON to explain y
 
 \`\`\`json
 {
-  "mode": "website" | "web-app" | "react-app" | "python" | "node" | "text" | "document",
+  "mode": "website" | "web-app" | "react-app" | "python" | "node" | "fullstack" | "text" | "document",
   "taskSummary": "One sentence describing what needs to be built",
   "techStack": {
     "styling": "tailwind" | "vanilla-css" | "both",
@@ -35,6 +35,8 @@ You can optionally include a brief <thinking> block before the JSON to explain y
   "designNotes": "Brief notes on visual style, color scheme, or UX requirements",
   "theme": "modern" | "corporate" | "playful" | "minimal" | "bold" | "creative",
   "typography": "modern" | "elegant" | "editorial" | "friendly" | "professional" | "minimal" | "playful" | "bold",
+  "recommendedComponents": ["component-name-1", "component-name-2"],
+  "backendAppType": "ecommerce" | "dashboard" | "social" | "cms" | "api",
   "complexityEstimate": "low" | "medium" | "high"
 }
 
@@ -106,6 +108,17 @@ For website and web-app modes, you can recommended pre-built components. Mention
 - NO index.html
 - Add extra files as needed (src/, routes/, utils/)
 
+### fullstack
+- MUST include: server.js, package.json, prisma/schema.prisma, .env.example, README.md, docker-compose.yml
+- Includes React frontend (public/index.html) + Express backend + PostgreSQL database
+- Use for applications that need persistent data storage and user management: e-commerce, dashboards, social networks, CMS
+- Specify \`backendAppType\` field: "ecommerce" (products, orders), "dashboard" (metrics, visualizations), "social" (posts, users, messaging), "cms" (pages, tags), or "api" (REST API)
+- Recommended features:
+  - E-commerce: product listings, shopping cart, orders, user accounts
+  - Dashboard: data visualization, filtering, export capabilities
+  - Social: user profiles, posts, comments, follows, messaging
+  - CMS: pages, blog posts, tags, comments, approval workflow
+
 ### text
 - files[] MUST be empty []
 
@@ -117,7 +130,7 @@ For website and web-app modes, you can recommended pre-built components. Mention
 
 ## Mode Decision Guide
 
-### Runnable software (web-app / website / python / node)
+### Runnable software (website / web-app / react-app / python / node / fullstack)
 Use these modes ONLY when the deliverable is software that runs, renders, or executes:
 - "Build a landing page..." → website
 - "Create a task management app..." → web-app
@@ -128,6 +141,10 @@ Use these modes ONLY when the deliverable is software that runs, renders, or exe
 - "Build a Flask web app..." → python
 - "Build a Node.js CLI that..." → node
 - "Build an Express API..." → node
+- "Build an e-commerce store..." → fullstack (needs database, user accounts, product storage)
+- "Create a dashboard with data visualization..." → fullstack (needs backend for data)
+- "Build a social network / blog platform..." → fullstack (needs user management, posts, database)
+- "Build a CMS..." → fullstack (needs content management, database, authentication)
 
 ### Document (structured written content — NOT runnable software)
 Use "document" when the deliverable is knowledge, reference material, or a written report — even if the prompt uses verbs like "build", "create", or "design":

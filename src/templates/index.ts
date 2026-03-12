@@ -53,6 +53,19 @@ export {
   getAnimationScript,
 } from "./animationLibraries.js";
 
+export {
+  getExpressServerTemplate,
+  getPrismaSchemaTemplate,
+  getEnvExampleTemplate,
+  getDockerComposeTemplate,
+  getDockerfileTemplate,
+  getPackageJsonTemplate,
+  getHealthRouteTemplate,
+  getDataRouteTemplate,
+  getReactAppTemplate,
+  getFullStackReadmeTemplate,
+} from "./backendTemplates.js";
+
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
