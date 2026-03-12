@@ -5,6 +5,7 @@ export {
   REACT_BUILDER_PROMPT,
   PYTHON_BUILDER_PROMPT,
   NODE_BUILDER_PROMPT,
+  FULLSTACK_BUILDER_PROMPT,
   getBuilderPromptForMode,
 } from "./builder.js";
 export { VERIFIER_SYSTEM_PROMPT, getVerifierPrompt } from "./verifier.js";
