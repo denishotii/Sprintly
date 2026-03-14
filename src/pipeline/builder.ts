@@ -32,8 +32,6 @@ const BUILDER_PROVIDER_OPTIONS = {
 } as Record<string, Record<string, unknown>>;
 
 // Cache design system CSS at module load to avoid re-generating on every build
-// Note: With enhanced design system, we now generate CSS per-theme, so less caching benefit
-// but we keep this structure for the fallback non-themed version
 const CACHED_DESIGN_SYSTEM = getFullDesignSystem();
 
 /** Modes that receive design system CSS injection (base + components). React handles its own styling. */
@@ -41,9 +39,6 @@ const MODES_WITH_DESIGN_SYSTEM_CSS: ProjectMode[] = ["website", "web-app"];
 
 /**
  * Extract files from tool calls made by the Builder.
- *
- * The Builder uses create_project (batch) or create_file (individual) tools.
- * This function normalises both into a flat ProjectFile[].
  */
 function extractFilesFromToolCalls(
   toolCalls: { name: string; args: Record<string, unknown>; result: unknown }[]
@@ -53,8 +48,6 @@ function extractFilesFromToolCalls(
 
   for (const tc of toolCalls) {
     if (tc.name === "create_project") {
-      // Batch tool: { projectName, files: [{ path, content }] }
-      // Some models pass `files` as a JSON-encoded string instead of a proper array — parse it.
       let rawFiles = (tc.args.files as { path: string; content: string }[] | string | undefined) ?? [];
       if (typeof rawFiles === "string") {
         const parsed = tryParseFilesFromString(rawFiles);
@@ -73,7 +66,6 @@ function extractFilesFromToolCalls(
         }
       }
     } else if (tc.name === "create_file") {
-      // Individual tool: { path, content }
       const path = tc.args.path as string | undefined;
       const content = tc.args.content as string | undefined;
       if (path && content !== undefined && !seen.has(path)) {
@@ -88,24 +80,17 @@ function extractFilesFromToolCalls(
 
 /**
  * Try to parse a string as a files array.
- * Handles a common model bug where `files` is a JSON string containing Python triple-quote syntax,
- * e.g. `"content": """..."""` instead of a properly JSON-escaped string.
  */
 function tryParseFilesFromString(str: string): { path: string; content: string }[] | null {
-  // 1. Standard JSON.parse
   try {
     const result = JSON.parse(str);
     if (Array.isArray(result)) return result as { path: string; content: string }[];
   } catch { /* fall through */ }
 
-  // 2. Repair Python triple-quote content values: "content": """..."""
-  //    The lazy [\s\S]*? stops at the first bare """ (not backslash-escaped \"""),
-  //    which should be the closing delimiter the model intended.
   try {
     const repaired = str.replace(
       /"content"\s*:\s*"""\n?([\s\S]*?)"""/g,
       (_match, rawContent: string) => {
-        // Unescape \\" → " and \\\\ → \\ so JSON.stringify gets the real characters
         const content = rawContent.replace(/\\"/g, '"').replace(/\\\\/g, "\\");
         return `"content": ${JSON.stringify(content)}`;
       }
@@ -117,20 +102,11 @@ function tryParseFilesFromString(str: string): { path: string; content: string }
   return null;
 }
 
-/** Match markdown fenced code blocks: optional language, then content until closing fence. */
+/** Match markdown fenced code blocks. */
 const FENCED_BLOCK_REGEX = /```(\w*)\s*\n?([\s\S]*?)```/g;
 
 /**
  * Fallback: extract project files from markdown code blocks in the model's text response.
- * Used when the model outputs code in the message body instead of via create_project.
- *
- * Path resolution order:
- *   1. File-path comment on the first line (e.g. `<!-- index.html -->`, `// scripts/app.js`)
- *   2. Plan file path by index
- *   3. Mode-aware default (returns null for unrecognised blocks)
- *
- * Blocks that cannot be mapped to a file are merged into README.md instead of creating
- * generic file5.html / file6.html junk files.
  */
 function parseCodeBlocksFromText(text: string, plan: PlanResult): ProjectFile[] {
   if (!text || text.trim().length === 0) return [];
@@ -149,7 +125,6 @@ function parseCodeBlocksFromText(text: string, plan: PlanResult): ProjectFile[] 
   const usedPaths = new Set<string>();
   let extraReadmeContent = "";
 
-  /** Mode-aware default path. Returns null (instead of file${N}.html) for unrecognised blocks. */
   function defaultPathForBlock(lang: string, index: number, blockContent: string): string | null {
     if (plan.mode === "python") {
       if (index === 0) return "main.py";
@@ -176,26 +151,21 @@ function parseCodeBlocksFromText(text: string, plan: PlanResult): ProjectFile[] 
   for (let i = 0; i < blocks.length; i++) {
     const { lang, content } = blocks[i];
 
-    // Skip pure documentation/markdown blocks — collect for README
     if (lang === "markdown" || lang === "md") {
       extraReadmeContent += (extraReadmeContent ? "\n\n" : "") + content;
       continue;
     }
 
-    // 1. Detect file path from first-line comment (e.g. <!-- index.html -->)
     let path: string | null = detectPathFromContent(content, lang);
 
-    // 2. Try plan path by index
     if (!path && i < planPaths.length) {
       path = planPaths[i];
     }
 
-    // 3. Mode-aware default
     if (!path) {
       path = defaultPathForBlock(lang, i, content);
     }
 
-    // 4. Unplaceable block → merge into README instead of creating file${N}.html
     if (!path) {
       extraReadmeContent += (extraReadmeContent ? "\n\n" : "") + content;
       continue;
@@ -207,7 +177,6 @@ function parseCodeBlocksFromText(text: string, plan: PlanResult): ProjectFile[] 
     files.push({ path: normalized, content });
   }
 
-  // Merge leftover content into README.md
   if (extraReadmeContent) {
     const readmeIdx = files.findIndex(
       (f) => f.path.toLowerCase().replace(/\\/g, "/") === "readme.md"
@@ -228,26 +197,18 @@ function looksLikeRequirements(content: string): boolean {
   return /^[\w\-_.]+(\s*[=<>]=?\s*[\w.*]+)?\s*$/.test(line) && !line.includes("def ") && !line.includes("import ");
 }
 
-/**
- * Try to detect a file path from a comment on the first line of a code block.
- * Models often output paths like `<!-- index.html -->` or `// scripts/app.js`.
- */
 function detectPathFromContent(content: string, lang: string): string | null {
   const firstLine = content.split("\n")[0].trim();
 
-  // HTML comment: <!-- path/to/file.ext -->
   const htmlMatch = firstLine.match(/^<!--\s*(\S+\.\w+)\s*-->$/);
   if (htmlMatch) return htmlMatch[1].trim();
 
-  // JS/CSS single-line: // path/to/file.ext
   const slashMatch = firstLine.match(/^\/\/\s*(\S+\.\w+)\s*$/);
   if (slashMatch) return slashMatch[1].trim();
 
-  // CSS block comment: /* path/to/file.ext */
   const blockMatch = firstLine.match(/^\/\*\s*(\S+\.\w+)\s*\*\/$/);
   if (blockMatch) return blockMatch[1].trim();
 
-  // Python/YAML/text: # file.ext (not markdown headings like # Title)
   if (lang === "python" || lang === "py" || lang === "yaml" || lang === "txt" || lang === "text") {
     const pyMatch = firstLine.match(/^#\s+(\S+\.\w+)\s*$/);
     if (pyMatch) return pyMatch[1].trim();
@@ -258,7 +219,6 @@ function detectPathFromContent(content: string, lang: string): string | null {
 
 /**
  * Generate README content for auto-added README.md, based on project mode.
- * Ensures run instructions match how the project is executed (browser vs pip/npm).
  */
 function generateReadmeForMode(
   mode: ProjectMode,
@@ -288,13 +248,9 @@ ${runSection}
 `;
 }
 
-/** Filename for grading-agent instructions (must be present in every code submission). */
+/** Filename for grading-agent instructions. */
 export const AI_AGENT_INSTRUCTIONS_FILENAME = "AI_AGENT_INSTRUCTIONS.md";
 
-/**
- * Build a compact "Project files" listing for the grading agent.
- * Excludes the instructions file itself and binary/asset extensions.
- */
 function buildProjectFilesSection(files: ProjectFile[]): string {
   const skipExt = new Set(["png", "jpg", "jpeg", "gif", "svg", "ico", "woff", "woff2"]);
   const listed = files
@@ -310,19 +266,6 @@ function buildProjectFilesSection(files: ProjectFile[]): string {
   return listed || "- (see zip contents)";
 }
 
-/**
- * Generate AI_AGENT_INSTRUCTIONS.md for the grading/judging agent.
- *
- * Structure (kept short and scannable):
- *   1. What was implemented — one-line task summary
- *   2. Prerequisites        — runtime / browser requirements
- *   3. Setup                — install commands (where applicable)
- *   4. How to run           — the exact command(s) to start the project
- *   5. Project files        — every file in the submission
- *   6. Quick test           — concrete verification steps
- *
- * This file is read by the receiving agent before running the code.
- */
 function generateAIAgentInstructionsForMode(
   mode: ProjectMode,
   taskSummary: string,
@@ -450,17 +393,13 @@ See README.md for setup and run instructions.
 
 /**
  * Inject design system CSS into styles/main.css for website and web-app modes.
- * Uses the enhanced design system with theme support from the Planner output.
- * Mutates the files array in place: either prepends to existing styles/main.css or appends a new file.
  */
 function injectDesignSystemCssIfNeeded(files: ProjectFile[], mode: ProjectMode, plan: PlanResult, jobPrompt: string): void {
   if (!MODES_WITH_DESIGN_SYSTEM_CSS.includes(mode)) return;
 
-  // Detect or use planned theme/typography
   const theme: ThemeName = (plan.theme as ThemeName) || (detectThemeFromPrompt(jobPrompt) as ThemeName) || "modern";
   const typography: TypographyName = (plan.typography as TypographyName) || (detectTypographyFromPrompt(jobPrompt) as TypographyName) || "modern";
 
-  // Generate enhanced CSS with theme and typography
   const enhancedCSS = getEnhancedDesignSystemCSS(theme, typography);
 
   const cssPath = "styles/main.css";
@@ -481,10 +420,6 @@ function injectDesignSystemCssIfNeeded(files: ProjectFile[], mode: ProjectMode, 
 
 /**
  * Run the Builder step.
- *
- * Sends the job prompt + plan to the BUILDER_MODEL.
- * Collects all generated files from tool calls (create_project / create_file).
- * Falls back to parsing the text response if no tool calls were made.
  */
 export async function runBuilder(
   jobPrompt: string,
@@ -492,7 +427,7 @@ export async function runBuilder(
 ): Promise<BuildResult> {
   const llm = getLLMClient();
 
-  // Text-mode tasks: use the dedicated text-response model (faster, cheaper)
+  // Text-mode tasks: use the dedicated text-response model
   if (plan.mode === "text") {
     logger.debug("Builder: text mode — generating direct response");
     const result = await llm.generateForStep("textResponse", {
@@ -500,7 +435,7 @@ export async function runBuilder(
       systemPrompt: TEXT_RESPONSE_SYSTEM_PROMPT,
       tools: false,
       temperature: 0.7,
-      maxTokens: 1200, // Tighter cap for ~5–6 tweet threads; keeps latency down with gpt-4o
+      maxTokens: 1200,
     });
 
     return {
@@ -522,8 +457,7 @@ export async function runBuilder(
     };
   }
 
-  // Document-mode tasks: generate a comprehensive markdown report and deliver it as a file.
-  // The grading agent receives report.md + AI_AGENT_INSTRUCTIONS.md (auto-added below).
+  // Document-mode tasks
   if (plan.mode === "document") {
     logger.debug("Builder: document mode — generating markdown report");
     const result = await llm.generateForStep("textResponse", {
@@ -539,9 +473,6 @@ export async function runBuilder(
       content: result.text,
     };
 
-    // Document mode: report.md IS the document (no separate README needed).
-    // AI_AGENT_INSTRUCTIONS.md is mandatory for the grading agent — add it here
-    // since the early return below skips the auto-generation code at the end of this function.
     const docFiles: ProjectFile[] = [reportFile];
     docFiles.push({
       path: AI_AGENT_INSTRUCTIONS_FILENAME,
@@ -566,22 +497,25 @@ export async function runBuilder(
     };
   }
 
-  // Code mode: generate files — use mode-specific system prompt (website, web-app, react-app, python, node)
+  // Code mode: generate files
   const systemPrompt = getBuilderPromptForMode(plan.mode);
-  let userMessage = assembleBuilderUserMessage({ jobPrompt, plan });
+  const userMessage = assembleBuilderUserMessage({ jobPrompt, plan });
 
-  const builderMaxTokens = parseInt(process.env.BUILDER_MAX_TOKENS || "16000", 10);
+  // FIX: Increased default from 16000 to 32000. Large projects (fullstack, feature-rich websites)
+  // need substantial output tokens: the create_project tool call embeds all file contents as JSON,
+  // which can easily exceed 16k tokens for multi-file projects. Use BUILDER_MAX_TOKENS in .env
+  // to override (e.g. BUILDER_MAX_TOKENS=64000 for very large fullstack apps).
+  const builderMaxTokens = parseInt(process.env.BUILDER_MAX_TOKENS || "32000", 10);
 
   const builderOptions = {
     systemPrompt,
     tools: true as const,
-    // Do NOT override toolChoice — let generateForStep enforce create_project tool usage
     maxTokens: builderMaxTokens,
     temperature: 0.4,
     providerOptions: BUILDER_PROVIDER_OPTIONS,
   };
 
-  logger.debug(`Builder: mode=${plan.mode}, generating ${plan.files.length} files for "${plan.taskSummary}"`);
+  logger.debug(`Builder: mode=${plan.mode}, maxTokens=${builderMaxTokens}, generating ${plan.files.length} files for "${plan.taskSummary}"`);
 
   let result = await llm.generateForStep("builder", {
     prompt: userMessage,
@@ -590,7 +524,20 @@ export async function runBuilder(
   let cumulativeUsage = result.usage;
   const firstResponseText = result.text ?? "";
 
-  // Track metrics for diagnostics
+  // Log initial call outcome to help diagnose token issues
+  logger.info(
+    `Builder: initial response — toolCalls=${result.toolCalls?.length ?? 0}, ` +
+    `textLength=${firstResponseText.length}, finishReason=${result.finishReason ?? "none"}`
+  );
+
+  if (result.finishReason === "length") {
+    logger.warn(
+      `Builder: initial call was truncated (finishReason=length). ` +
+      `Current limit: ${builderMaxTokens} tokens. ` +
+      `Set BUILDER_MAX_TOKENS to a higher value (e.g. 64000) in your .env if this persists.`
+    );
+  }
+
   const metrics: BuilderMetrics = {
     retriedForZeroFiles: false,
     usedMarkdownFallback: false,
@@ -598,7 +545,6 @@ export async function runBuilder(
     filesFromFallback: 0,
   };
 
-  // Extract files from tool calls (mode-agnostic)
   let files: ProjectFile[] = [];
 
   if (result.toolCalls && result.toolCalls.length > 0) {
@@ -624,7 +570,6 @@ export async function runBuilder(
   }
 
   // Try parsing code blocks from the first response BEFORE making a second LLM call.
-  // With toolChoice: "auto", the model may output code blocks in its text alongside tool calls.
   if (files.length === 0 && firstResponseText.trim()) {
     const textFallbackFiles = parseCodeBlocksFromText(firstResponseText, plan);
     if (textFallbackFiles.length > 0) {
@@ -637,7 +582,7 @@ export async function runBuilder(
     }
   }
 
-  // Retry once WITHOUT tools if we still have no files — last resort.
+  // Retry once WITHOUT tools if we still have no files.
   if (files.length === 0) {
     metrics.retriedForZeroFiles = true;
     const noToolsNudge =
@@ -653,7 +598,7 @@ export async function runBuilder(
       maxTokens: builderMaxTokens,
       temperature: 0.4,
       providerOptions: BUILDER_PROVIDER_OPTIONS,
-      tools: false,
+      tools: false, // explicit false: disable tools so model outputs code blocks freely
     });
     result = retryResult;
     if (retryResult.usage && cumulativeUsage) {
@@ -665,6 +610,14 @@ export async function runBuilder(
     } else if (retryResult.usage) {
       cumulativeUsage = retryResult.usage;
     }
+
+    if (retryResult.finishReason === "length") {
+      logger.warn(
+        `Builder: retry also truncated (finishReason=length, maxTokens=${builderMaxTokens}). ` +
+        `Set BUILDER_MAX_TOKENS to a higher value in your .env.`
+      );
+    }
+
     if (retryResult.text?.trim()) {
       const retryFiles = parseCodeBlocksFromText(retryResult.text, plan);
       if (retryFiles.length > 0) {
@@ -684,15 +637,15 @@ export async function runBuilder(
       `Builder: no files extracted — project will be empty. Ensure the model calls create_project with a non-empty files array.${reason}`
     );
     if (result.finishReason === "length") {
-      logger.warn("Builder: response was truncated; the model hit max output tokens. Output may need more headroom.");
+      logger.warn(
+        "Builder: response was truncated; the model hit max output tokens. " +
+        `Increase BUILDER_MAX_TOKENS in your .env (current: ${builderMaxTokens}).`
+      );
     }
   }
 
-  // Inject design system CSS only for website and web-app (not react-app; they handle their own styling)
   injectDesignSystemCssIfNeeded(files, plan.mode, plan, jobPrompt);
 
-  // Ensure README.md exists — content depends on mode (browser vs pip/npm).
-  // Note: document mode returns early above, so this is only reached for code modes.
   const hasReadme = files.some((f) => f.path.toLowerCase().replace(/\\/g, "/") === "readme.md");
   if (!hasReadme && files.length > 0) {
     logger.debug("Builder: auto-generating README.md (mode-aware)");
@@ -702,7 +655,6 @@ export async function runBuilder(
     });
   }
 
-  // Mandatory for grading agent: AI_AGENT_INSTRUCTIONS.md (short run + test instructions)
   const aiInstructionsPath = AI_AGENT_INSTRUCTIONS_FILENAME;
   const hasAIAgentInstructions = files.some(
     (f) => f.path.replace(/\\/g, "/").toLowerCase() === aiInstructionsPath.toLowerCase()
@@ -714,7 +666,6 @@ export async function runBuilder(
       content: generateAIAgentInstructionsForMode(plan.mode, plan.taskSummary, files),
     });
   } else if (hasAIAgentInstructions) {
-    // Overwrite with canonical content so format and length stay consistent for graders
     const idx = files.findIndex(
       (f) => f.path.replace(/\\/g, "/").toLowerCase() === aiInstructionsPath.toLowerCase()
     );

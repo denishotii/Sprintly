@@ -247,8 +247,19 @@ export class LLMClient {
 
   /**
    * Get available tools based on configuration.
-   * @param filter - 'all' (default) returns every enabled tool; 'builder' returns only create_project, create_file, finalize_project for the pipeline builder step.
-   * @param executionId - Execution context ID for tracking builders across concurrent jobs
+   *
+   * FIX: create_project, create_file, and finalize_project are pipeline infrastructure tools
+   * required for the builder step to function. They are always registered regardless of
+   * TOOL_CODE_INTERPRETER_ENABLED. Previously these were gated behind codeInterpreterEnabled,
+   * which caused silent failures when that flag was false/missing — the tools simply weren't
+   * registered, toolChoice fell back to "auto", and the model skipped the tool call entirely.
+   *
+   * code_analysis remains opt-in (controlled by TOOL_CODE_INTERPRETER_ENABLED) since it is
+   * a general-purpose helper tool, not pipeline infrastructure.
+   *
+   * @param filter - 'all' returns every enabled tool; 'builder' returns only the three
+   *   project-building tools (create_project, create_file, finalize_project).
+   * @param executionId - Execution context ID for tracking builders across concurrent jobs.
    */
   private getTools(filter?: "all" | "builder", executionId?: string): Record<string, Tool> {
     const config = getConfig();
@@ -268,7 +279,6 @@ export class LLMClient {
           try {
             const results = await webSearch(query);
             logger.tool("web_search", "success", `Found ${results.length} results`);
-            // Log result snippets for debugging
             for (const r of results.slice(0, 2)) {
               logger.debug(`Search result: "${r.title}" - ${r.snippet.substring(0, 100)}...`);
             }
@@ -306,6 +316,7 @@ export class LLMClient {
       });
     }
 
+    // code_analysis is an optional general-purpose tool controlled by codeInterpreterEnabled.
     if (config.tools.codeInterpreterEnabled) {
       tools.code_analysis = tool({
         description:
@@ -322,7 +333,6 @@ export class LLMClient {
         })),
         execute: async ({ code, language, task }: { code: string; language?: string; task: string }) => {
           logger.tool("code_analysis", "start", `Task: ${task}`);
-          // This is a meta-tool - it returns structured data for the LLM to use
           return {
             code,
             language: language || "unknown",
@@ -331,122 +341,126 @@ export class LLMClient {
           };
         },
       });
-
-      // Batch project creation — preferred for pipeline builder step (one call, all files)
-      tools.create_project = tool({
-        description: `Create a complete project in one call: pass projectName and a NON-EMPTY array of { path, content } for every file. You MUST include the actual file contents in the 'content' field — do not pass an empty files array. All files are written and zipped in one step. Include the entry point (index.html / main.py / index.js), README.md, and all other files from the plan. Do not include AI_AGENT_INSTRUCTIONS.md — it is auto-generated. Do NOT use for text-only requests.`,
-        inputSchema: zodSchema(z.object({
-          projectName: z.string().describe("Short slug for the project (e.g. 'landing-page', 'todo-app')"),
-          files: z.array(z.object({
-            path: z.string().describe("Relative path, e.g. 'index.html', 'styles/main.css'"),
-            content: z.string().min(1, "content must not be empty — write the full file content here"),
-          }))
-            .min(1, "files must not be empty — include every project file with its full content")
-            .describe("All project files with complete content. REQUIRED: must have at least one file."),
-        })),
-        execute: async ({ projectName, files }: { projectName: string; files: ProjectFile[] }) => {
-          logger.tool("create_project", "start", `${projectName} (${files?.length ?? 0} files)`);
-
-          // Belt-and-suspenders: guard against an empty array slipping past Zod
-          if (!files || files.length === 0) {
-            const msg =
-              "create_project was called with an empty files array. You must include all project files " +
-              "with their complete content in the 'files' array. Do not pass files: [].";
-            logger.warn(`create_project: ${msg}`);
-            throw new Error(msg);
-          }
-
-          try {
-            const builder = getBuilderForExecution(executionId || "default");
-            builder.createBatch(projectName, files);
-            const result = await builder.createZip(`${projectName}.zip`);
-            logger.tool("create_project", "success", `${result.zipPath} (${result.files.length} files)`);
-            return {
-              success: result.success,
-              projectName,
-              projectDir: result.projectDir,
-              zipPath: result.zipPath,
-              files: result.files,
-              totalSize: result.totalSize,
-              error: result.error,
-            };
-          } catch (error) {
-            logger.tool("create_project", "error", String(error));
-            throw error;
-          }
-        },
-      });
-
-      // Single-file creation — for verifier patches or legacy create_file-then-finalize flow
-      tools.create_file = tool({
-        description: `Create a single file for a deliverable code project. Prefer create_project when building a full project in one go. Use create_file for adding or patching one file (e.g. after review). Call finalize_project to package all files into a zip.`,
-        inputSchema: zodSchema(z.object({
-          path: z
-            .string()
-            .describe(
-              "The file path relative to the project root (e.g., 'index.html', 'src/App.tsx', 'styles/main.css')"
-            ),
-          content: z
-            .string()
-            .describe("The complete content of the file"),
-        })),
-        execute: async ({ path, content }: { path: string; content: string }) => {
-          logger.tool("create_file", "start", `Creating: ${path}`);
-          try {
-            const builder = getBuilderForExecution(executionId || "default");
-            builder.addFile(path, content);
-
-            const files = builder.getFiles();
-            logger.tool("create_file", "success", `Created ${path}, total files: ${files.length}`);
-
-            return {
-              success: true,
-              path,
-              size: content.length,
-              totalFiles: files.length,
-              allFiles: files,
-            };
-          } catch (error) {
-            logger.tool("create_file", "error", String(error));
-            throw error;
-          }
-        },
-      });
-
-        tools.finalize_project = tool({
-        description: `Package all files created with create_file into a downloadable zip. Call this after creating all project files. Only use when you've built a real code project.`,
-        inputSchema: zodSchema(z.object({
-          projectName: z
-            .string()
-            .describe("A descriptive name for the project (e.g., 'business-website', 'react-todo-app')"),
-        })),
-        execute: async ({ projectName }: { projectName: string }) => {
-          logger.tool("finalize_project", "start", `Finalizing: ${projectName}`);
-          try {
-            const builder = getBuilderForExecution(executionId || "default");
-            const files = builder.getFiles();
-            if (files.length === 0) {
-              throw new Error("No files have been created. Use create_file first.");
-            }
-
-            const result = await builder.createZip(`${projectName}.zip`);
-            logger.tool("finalize_project", "success", `Created ${result.zipPath} (${result.totalSize} bytes)`);
-
-            return {
-              success: result.success,
-              projectName,
-              zipPath: result.zipPath,
-              files: result.files,
-              totalSize: result.totalSize,
-              error: result.error,
-            };
-          } catch (error) {
-            logger.tool("finalize_project", "error", String(error));
-            throw error;
-          }
-        },
-      });
     }
+
+    // ─── Pipeline infrastructure tools ──────────────────────────────────────────
+    // These are ALWAYS registered regardless of codeInterpreterEnabled.
+    // The builder step requires create_project to function; gating it behind an
+    // optional flag silently breaks the pipeline when that flag is unset or false.
+
+    // Batch project creation — preferred for pipeline builder step (one call, all files)
+    tools.create_project = tool({
+      description: `Create a complete project in one call: pass projectName and a NON-EMPTY array of { path, content } for every file. You MUST include the actual file contents in the 'content' field — do not pass an empty files array. All files are written and zipped in one step. Include the entry point (index.html / main.py / index.js), README.md, and all other files from the plan. Do not include AI_AGENT_INSTRUCTIONS.md — it is auto-generated. Do NOT use for text-only requests.`,
+      inputSchema: zodSchema(z.object({
+        projectName: z.string().describe("Short slug for the project (e.g. 'landing-page', 'todo-app')"),
+        files: z.array(z.object({
+          path: z.string().describe("Relative path, e.g. 'index.html', 'styles/main.css'"),
+          content: z.string().min(1, "content must not be empty — write the full file content here"),
+        }))
+          .min(1, "files must not be empty — include every project file with its full content")
+          .describe("All project files with complete content. REQUIRED: must have at least one file."),
+      })),
+      execute: async ({ projectName, files }: { projectName: string; files: ProjectFile[] }) => {
+        logger.tool("create_project", "start", `${projectName} (${files?.length ?? 0} files)`);
+
+        if (!files || files.length === 0) {
+          const msg =
+            "create_project was called with an empty files array. You must include all project files " +
+            "with their complete content in the 'files' array. Do not pass files: [].";
+          logger.warn(`create_project: ${msg}`);
+          throw new Error(msg);
+        }
+
+        try {
+          const builder = getBuilderForExecution(executionId || "default");
+          builder.createBatch(projectName, files);
+          const result = await builder.createZip(`${projectName}.zip`);
+          logger.tool("create_project", "success", `${result.zipPath} (${result.files.length} files)`);
+          return {
+            success: result.success,
+            projectName,
+            projectDir: result.projectDir,
+            zipPath: result.zipPath,
+            files: result.files,
+            totalSize: result.totalSize,
+            error: result.error,
+          };
+        } catch (error) {
+          logger.tool("create_project", "error", String(error));
+          throw error;
+        }
+      },
+    });
+
+    // Single-file creation — for verifier patches or legacy create_file-then-finalize flow
+    tools.create_file = tool({
+      description: `Create a single file for a deliverable code project. Prefer create_project when building a full project in one go. Use create_file for adding or patching one file (e.g. after review). Call finalize_project to package all files into a zip.`,
+      inputSchema: zodSchema(z.object({
+        path: z
+          .string()
+          .describe(
+            "The file path relative to the project root (e.g., 'index.html', 'src/App.tsx', 'styles/main.css')"
+          ),
+        content: z
+          .string()
+          .describe("The complete content of the file"),
+      })),
+      execute: async ({ path, content }: { path: string; content: string }) => {
+        logger.tool("create_file", "start", `Creating: ${path}`);
+        try {
+          const builder = getBuilderForExecution(executionId || "default");
+          builder.addFile(path, content);
+
+          const files = builder.getFiles();
+          logger.tool("create_file", "success", `Created ${path}, total files: ${files.length}`);
+
+          return {
+            success: true,
+            path,
+            size: content.length,
+            totalFiles: files.length,
+            allFiles: files,
+          };
+        } catch (error) {
+          logger.tool("create_file", "error", String(error));
+          throw error;
+        }
+      },
+    });
+
+    tools.finalize_project = tool({
+      description: `Package all files created with create_file into a downloadable zip. Call this after creating all project files. Only use when you've built a real code project.`,
+      inputSchema: zodSchema(z.object({
+        projectName: z
+          .string()
+          .describe("A descriptive name for the project (e.g., 'business-website', 'react-todo-app')"),
+      })),
+      execute: async ({ projectName }: { projectName: string }) => {
+        logger.tool("finalize_project", "start", `Finalizing: ${projectName}`);
+        try {
+          const builder = getBuilderForExecution(executionId || "default");
+          const files = builder.getFiles();
+          if (files.length === 0) {
+            throw new Error("No files have been created. Use create_file first.");
+          }
+
+          const result = await builder.createZip(`${projectName}.zip`);
+          logger.tool("finalize_project", "success", `Created ${result.zipPath} (${result.totalSize} bytes)`);
+
+          return {
+            success: result.success,
+            projectName,
+            zipPath: result.zipPath,
+            files: result.files,
+            totalSize: result.totalSize,
+            error: result.error,
+          };
+        } catch (error) {
+          logger.tool("finalize_project", "error", String(error));
+          throw error;
+        }
+      },
+    });
 
     if (filter === "builder") {
       const builderToolNames = ["create_project", "create_file", "finalize_project"];
@@ -461,8 +475,7 @@ export class LLMClient {
   }
 
   /**
-   * Generate a response for a pipeline step using that step's configured model (PLANNER_MODEL, BUILDER_MODEL, VERIFIER_MODEL).
-   * Use this when implementing the planner → builder → verifier pipeline; the correct provider (OpenAI/Anthropic) is chosen from the model ID.
+   * Generate a response for a pipeline step using that step's configured model.
    */
   async generateForStep(
     step: PipelineStep,
@@ -479,12 +492,28 @@ export class LLMClient {
     const model = this.getModelForStep(step);
     const provider = this.getProviderForModel(model);
     const toolsFilter = options.toolsFilter ?? (step === "builder" || step === "textResponse" ? "builder" : "all");
-    const tools = options.tools !== false ? this.getTools(toolsFilter, executionId) : undefined;
+
+    // FIX: Respect options.tools === false for explicit opt-out (e.g. the no-tools retry in
+    // builder.ts). Do NOT override an explicit false — that breaks the code-block fallback path.
+    // The builder tools are now always registered in getTools() regardless of codeInterpreterEnabled,
+    // so as long as options.tools is not explicitly false, create_project will be available.
+    const tools = options.tools !== false
+      ? this.getTools(toolsFilter, executionId)
+      : undefined;
+
     const toolChoice =
       options.toolChoice ??
       (step === "builder" && tools?.create_project
         ? { type: "tool" as const, toolName: "create_project" }
         : undefined);
+
+    logger.info(
+      `generateForStep: step=${step}, toolsFilter=${toolsFilter}, ` +
+      `hasTools=${tools ? Object.keys(tools).length > 0 : false}, ` +
+      `toolNames=${tools ? Object.keys(tools).join(",") : "none"}, ` +
+      `toolChoice=${toolChoice ? (typeof toolChoice === "string" ? toolChoice : toolChoice.toolName) : "auto"}`
+    );
+
     const result = await this.executeGenerationWithProvider(provider, model, {
       prompt: options.prompt,
       systemPrompt: options.systemPrompt,
@@ -495,7 +524,6 @@ export class LLMClient {
       providerOptions: options.providerOptions,
     });
 
-    // Propagate executionId for next pipeline step
     return {
       ...result,
       executionId,
@@ -516,7 +544,6 @@ export class LLMClient {
 
     logger.debug(`Generating response with provider: ${this.primaryProvider.name}`);
 
-    // Create execution context for builder tracking
     const executionId = options.executionId || randomUUID();
 
     const tools = enableTools ? this.getTools("all", executionId) : undefined;
@@ -526,7 +553,6 @@ export class LLMClient {
     let attempt = 0;
     const retryConfig = getRetryConfig();
 
-    // Retry loop for recoverable errors
     while (attempt <= retryConfig.maxRetries) {
       try {
         const result = await this.executeGenerationWithProvider(
@@ -554,14 +580,12 @@ export class LLMClient {
           continue;
         }
 
-        // Not retryable or exhausted retries - try fallback if tools were enabled
         if (hasTools && retryConfig.fallbackNoTools && attempt >= retryConfig.maxRetries && isRetryableError(error)) {
           logger.warn(
             `Exhausted ${retryConfig.maxRetries} retries for tool calling, attempting fallback without tools`
           );
 
           try {
-            // Try without tools
             const fallbackResult = await this.executeGenerationWithProvider(
               this.primaryProvider,
               undefined,
@@ -581,23 +605,19 @@ export class LLMClient {
             };
           } catch (fallbackError) {
             logger.error("Fallback generation also failed:", fallbackError);
-            // Throw the original error as it's more informative
             throw lastError;
           }
         }
 
-        // Re-throw non-retryable errors immediately
         throw error;
       }
     }
 
-    // Should not reach here, but just in case
     throw lastError;
   }
 
   /**
    * Execute the actual LLM generation (separated for retry logic).
-   * Can use a specific provider and model (e.g. for pipeline steps) or the primary provider with default model.
    */
   private async executeGenerationWithProvider(
     provider: LLMProvider,
@@ -634,8 +654,6 @@ export class LLMClient {
       }
     }
 
-    // Derive projectBuild from tool calls.
-    // Prefer finalize_project (post-patch final zip) over create_project (initial batch zip).
     let projectBuild: ProjectBuildResult | undefined;
 
     const finalizeCall = (toolCalls ?? []).find((tc) => tc.name === "finalize_project");
@@ -651,7 +669,7 @@ export class LLMClient {
       if (finalizeResult.success) {
         projectBuild = {
           success: true,
-          projectDir: finalizeResult.zipPath.replace(/[^/]*\.zip$/, ""), // Extract dir from zip path
+          projectDir: finalizeResult.zipPath.replace(/[^/]*\.zip$/, ""),
           zipPath: finalizeResult.zipPath,
           files: finalizeResult.files,
           totalSize: finalizeResult.totalSize,
@@ -687,18 +705,16 @@ export class LLMClient {
   }
 
   /**
-   * Clean up builder resources after pipeline completes (call this from runPipeline).
+   * Clean up builder resources after pipeline completes.
    */
   cleanupExecution(executionId: string): void {
     cleanupBuilder(executionId);
   }
 
   /**
-   * Get the active project builder for a specific execution (legacy support).
-   * @deprecated Use executionId tracking instead for concurrent job safety
+   * @deprecated Use executionId tracking instead for concurrent job safety.
    */
   getActiveProjectBuilder(): ProjectBuilder | null {
-    // For backwards compatibility, return null - execution-scoped builders are the new way
     return null;
   }
 
@@ -740,7 +756,6 @@ export function getLLMClient(): LLMClient {
 
 /**
  * Export cleanupBuilder for external use (e.g., from pipeline orchestrator)
- * Cleans up builder resources after pipeline execution completes
  */
 export function cleanupBuilderExecution(executionId: string): void {
   cleanupBuilder(executionId);
